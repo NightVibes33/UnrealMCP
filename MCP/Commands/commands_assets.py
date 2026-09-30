@@ -1,4 +1,4 @@
-"""Content Browser and Asset Registry tools."""
+"""Content Browser and Asset Registry tools using UE 5.8 editor subsystems."""
 
 from __future__ import annotations
 from utils import run_unreal_json
@@ -12,7 +12,7 @@ def register_all(mcp):
         recursive: bool = True,
         limit: int = 200,
     ) -> list[dict]:
-        """Search assets by name/path and optional class."""
+        """Search assets by name/path and optional class using AssetRegistry."""
         return run_unreal_json(
             """
             registry = unreal.AssetRegistryHelpers.get_asset_registry()
@@ -42,58 +42,83 @@ def register_all(mcp):
         )
 
     @mcp.tool()
-    def get_asset_info(asset_path: str) -> dict:
-        """Inspect an asset without modifying it."""
+    def list_assets(path: str = "/Game", recursive: bool = True, include_folders: bool = False, limit: int = 1000) -> list[str]:
+        """List asset paths through EditorAssetSubsystem."""
         return run_unreal_json(
             """
-            data = unreal.EditorAssetLibrary.find_asset_data(args["asset_path"])
-            if not data or not data.is_valid():
+            subsystem = unreal.get_editor_subsystem(unreal.EditorAssetSubsystem)
+            paths = subsystem.list_assets(args["path"], recursive=bool(args["recursive"]), include_folder=bool(args["include_folders"]))
+            result = [str(x) for x in list(paths)[:int(args["limit"])]]
+            """,
+            {"path": path, "recursive": recursive, "include_folders": include_folders, "limit": limit},
+        )
+
+    @mcp.tool()
+    def get_asset_info(asset_path: str) -> dict:
+        """Inspect an asset, its package metadata and referencers."""
+        return run_unreal_json(
+            """
+            subsystem = unreal.get_editor_subsystem(unreal.EditorAssetSubsystem)
+            if not subsystem.does_asset_exist(args["asset_path"]):
                 raise RuntimeError(f'Asset not found: {args["asset_path"]}')
-            asset = data.get_asset()
+            data = subsystem.find_asset_data(args["asset_path"])
+            asset = subsystem.load_asset(args["asset_path"])
+            referencers = []
+            try:
+                referencers = list(subsystem.find_package_referencers_for_asset(args["asset_path"], False))
+            except Exception:
+                pass
             result = {
-                "name": str(data.asset_name),
-                "package": str(data.package_name),
-                "object_path": str(data.get_soft_object_path()),
+                "name": str(data.asset_name) if data else (asset.get_name() if asset else None),
+                "package": str(data.package_name) if data else None,
+                "object_path": str(data.get_soft_object_path()) if data else (asset.get_path_name() if asset else args["asset_path"]),
                 "class": asset.get_class().get_name() if asset else str(getattr(data, "asset_class_path", "")),
                 "loaded": asset is not None,
-                "referencers": list(unreal.EditorAssetLibrary.find_package_referencers_for_asset(args["asset_path"], False)),
+                "referencers": [str(x) for x in referencers],
             }
             """,
             {"asset_path": asset_path},
         )
 
     @mcp.tool()
-    def duplicate_asset(source_path: str, destination_path: str) -> dict:
-        """Duplicate an asset to a new object path."""
+    def duplicate_asset(source_path: str, destination_path: str, save: bool = True) -> dict:
+        """Duplicate an asset using EditorAssetSubsystem."""
         return run_unreal_json(
             """
-            asset = unreal.EditorAssetLibrary.duplicate_asset(args["source_path"], args["destination_path"])
+            subsystem = unreal.get_editor_subsystem(unreal.EditorAssetSubsystem)
+            with unreal.ScopedEditorTransaction("UnrealMCP Duplicate Asset"):
+                asset = subsystem.duplicate_asset(args["source_path"], args["destination_path"])
             if asset is None:
                 raise RuntimeError("Duplicate failed")
-            result = {"path": asset.get_path_name(), "name": asset.get_name()}
+            saved = bool(subsystem.save_loaded_asset(asset, True)) if bool(args["save"]) else False
+            result = {"path": asset.get_path_name(), "name": asset.get_name(), "saved": saved}
             """,
-            {"source_path": source_path, "destination_path": destination_path},
+            {"source_path": source_path, "destination_path": destination_path, "save": save},
         )
 
     @mcp.tool()
     def rename_asset(source_path: str, destination_path: str) -> dict:
-        """Rename or move an asset."""
+        """Rename or move an asset using EditorAssetSubsystem."""
         return run_unreal_json(
             """
-            ok = unreal.EditorAssetLibrary.rename_asset(args["source_path"], args["destination_path"])
+            subsystem = unreal.get_editor_subsystem(unreal.EditorAssetSubsystem)
+            with unreal.ScopedEditorTransaction("UnrealMCP Rename Asset"):
+                ok = subsystem.rename_asset(args["source_path"], args["destination_path"])
             if not ok:
                 raise RuntimeError("Rename failed")
-            result = {"source": args["source_path"], "destination": args["destination_path"]}
+            result = {"source": args["source_path"], "destination": args["destination_path"], "renamed": True}
             """,
             {"source_path": source_path, "destination_path": destination_path},
         )
 
     @mcp.tool()
     def delete_asset(asset_path: str) -> dict:
-        """Delete an asset from the project."""
+        """Force-delete an asset through EditorAssetSubsystem."""
         return run_unreal_json(
             """
-            ok = unreal.EditorAssetLibrary.delete_asset(args["asset_path"])
+            subsystem = unreal.get_editor_subsystem(unreal.EditorAssetSubsystem)
+            with unreal.ScopedEditorTransaction("UnrealMCP Delete Asset"):
+                ok = subsystem.delete_asset(args["asset_path"])
             if not ok:
                 raise RuntimeError("Delete failed")
             result = {"deleted": args["asset_path"]}
@@ -103,10 +128,11 @@ def register_all(mcp):
 
     @mcp.tool()
     def save_asset(asset_path: str, only_if_dirty: bool = True) -> dict:
-        """Save one asset package."""
+        """Save one asset package through EditorAssetSubsystem."""
         return run_unreal_json(
             """
-            ok = unreal.EditorAssetLibrary.save_asset(args["asset_path"], only_if_is_dirty=bool(args["only_if_dirty"]))
+            subsystem = unreal.get_editor_subsystem(unreal.EditorAssetSubsystem)
+            ok = subsystem.save_asset(args["asset_path"], only_if_is_dirty=bool(args["only_if_dirty"]))
             result = {"path": args["asset_path"], "saved": bool(ok)}
             """,
             {"asset_path": asset_path, "only_if_dirty": only_if_dirty},
@@ -114,10 +140,11 @@ def register_all(mcp):
 
     @mcp.tool()
     def create_content_folder(path: str) -> dict:
-        """Create a Content Browser directory."""
+        """Create a Content Browser directory through EditorAssetSubsystem."""
         return run_unreal_json(
             """
-            ok = unreal.EditorAssetLibrary.make_directory(args["path"])
+            subsystem = unreal.get_editor_subsystem(unreal.EditorAssetSubsystem)
+            ok = subsystem.make_directory(args["path"])
             result = {"path": args["path"], "created": bool(ok)}
             """,
             {"path": path},
@@ -125,7 +152,7 @@ def register_all(mcp):
 
     @mcp.tool()
     def import_asset(source_file: str, destination_path: str, replace_existing: bool = False) -> list[str]:
-        """Import a source file into a Content Browser folder."""
+        """Import a source file with AssetImportTask."""
         return run_unreal_json(
             """
             task = unreal.AssetImportTask()
@@ -135,8 +162,37 @@ def register_all(mcp):
             task.save = True
             task.replace_existing = bool(args["replace_existing"])
             unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks([task])
-            result = list(task.imported_object_paths)
+            result = [str(x) for x in task.imported_object_paths]
             """,
             {"source_file": source_file, "destination_path": destination_path, "replace_existing": replace_existing},
-            timeout=120,
+            timeout=180,
+        )
+
+    @mcp.tool()
+    def open_asset_editor(asset_path: str) -> dict:
+        """Open an asset in its native Unreal asset editor."""
+        return run_unreal_json(
+            """
+            asset = unreal.load_asset(args["asset_path"])
+            if asset is None:
+                raise RuntimeError(f'Asset not found: {args["asset_path"]}')
+            subsystem = unreal.get_editor_subsystem(unreal.AssetEditorSubsystem)
+            ok = subsystem.open_editor_for_assets([asset])
+            result = {"path": asset.get_path_name(), "opened": bool(ok)}
+            """,
+            {"asset_path": asset_path},
+        )
+
+    @mcp.tool()
+    def close_asset_editor(asset_path: str) -> dict:
+        """Close all open editors for an asset."""
+        return run_unreal_json(
+            """
+            asset = unreal.load_asset(args["asset_path"])
+            if asset is None:
+                raise RuntimeError(f'Asset not found: {args["asset_path"]}')
+            count = unreal.get_editor_subsystem(unreal.AssetEditorSubsystem).close_all_editors_for_asset(asset)
+            result = {"path": asset.get_path_name(), "closed_editors": int(count)}
+            """,
+            {"asset_path": asset_path},
         )

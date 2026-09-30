@@ -6,31 +6,38 @@ from utils import run_unreal_json
 def register_all(mcp):
     @mcp.tool()
     def unreal_status() -> dict:
-        """Return engine, project, world and editor connection information."""
+        """Return engine, Python, project, world and dirty-package information."""
         return run_unreal_json(
             """
+            import sys
             editor = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem)
             world = editor.get_editor_world()
+            dirty_content = unreal.EditorLoadingAndSavingUtils.get_dirty_content_packages()
+            dirty_maps = unreal.EditorLoadingAndSavingUtils.get_dirty_map_packages()
             result = {
                 "engine_version": unreal.SystemLibrary.get_engine_version(),
+                "python_version": sys.version,
                 "project_dir": unreal.Paths.project_dir(),
                 "project_content_dir": unreal.Paths.project_content_dir(),
                 "project_file": unreal.Paths.get_project_file_path(),
                 "world": world.get_path_name() if world else None,
                 "is_game_world": bool(world and world.is_game_world()),
+                "dirty_content_packages": [str(x) for x in dirty_content],
+                "dirty_map_packages": [str(x) for x in dirty_maps],
             }
             """
         )
 
     @mcp.tool()
     def save_all_dirty_assets() -> dict:
-        """Save dirty content packages and the current map."""
+        """Save dirty map and content packages."""
         return run_unreal_json(
             """
-            content_saved = unreal.EditorLoadingAndSavingUtils.save_dirty_packages(
-                save_map_packages=True, save_content_packages=True
+            ok = unreal.EditorLoadingAndSavingUtils.save_dirty_packages(
+                save_map_packages=True,
+                save_content_packages=True,
             )
-            result = {"saved": bool(content_saved)}
+            result = {"saved": bool(ok)}
             """
         )
 
@@ -40,7 +47,10 @@ def register_all(mcp):
         return run_unreal_json(
             """
             selected = unreal.EditorUtilityLibrary.get_selected_assets()
-            result = [{"name": a.get_name(), "class": a.get_class().get_name(), "path": a.get_path_name()} for a in selected]
+            result = [
+                {"name": a.get_name(), "class": a.get_class().get_name(), "path": a.get_path_name()}
+                for a in selected
+            ]
             """
         )
 

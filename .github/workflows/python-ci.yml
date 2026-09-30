@@ -1,4 +1,4 @@
-name: Python MCP checks
+name: UnrealMCP checks
 
 on:
   push:
@@ -7,23 +7,36 @@ on:
 
 jobs:
   python:
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.13"]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: "pip"
           cache-dependency-path: "MCP/requirements.txt"
       - run: python -m pip install -r MCP/requirements.txt
       - run: python -m compileall -q MCP
-      - name: Import and register all command modules
+      - name: Import and register complete tool surface
         run: |
           python - <<'PY'
           import sys
           sys.path.insert(0, "MCP")
           import unreal_mcp_bridge
           count = unreal_mcp_bridge.load_commands()
-          assert count >= 8, count
+          assert count >= 16, count
           print(f"registered {count} command modules")
           PY
+      - name: Transport tests
+        run: |
+          cd MCP
+          python -m unittest tests.test_transport -v
+      - name: Modernization guards
+        run: |
+          ! grep -R 'EditorStyleSet.h' Source/UnrealMCP
+          ! grep -R 'EditorStaticMeshLibrary' MCP/Commands Source/UnrealMCP
+          ! grep -R 'DataLayerSubsystem' MCP/Commands Source/UnrealMCP
+          ! grep -R 'GEngine->Exec.*py' Source/UnrealMCP

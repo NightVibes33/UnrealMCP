@@ -1,34 +1,34 @@
 {
-	"FileVersion": 3,
-	"Version": 10000,
-	"VersionName": "1.0.0",
-	"FriendlyName": "UnrealMCP",
-	"Description": "AI-facing Model Context Protocol integration for controlling and inspecting Unreal Editor.",
-	"Category": "Integration",
-	"CreatedBy": "kvick",
-	"CreatedByURL": "https://x.com/kvickart",
-	"DocsURL": "",
-	"MarketplaceURL": "",
-	"SupportURL": "",
-	"CanContainContent": true,
-	"IsBetaVersion": true,
-	"IsExperimentalVersion": false,
-	"Installed": false,
-	"Modules": [
-		{
-			"Name": "UnrealMCP",
-			"Type": "Editor",
-			"LoadingPhase": "PreDefault"
-		}
-	],
-	"Plugins": [
-		{
-			"Name": "PythonScriptPlugin",
-			"Enabled": true
-		},
-		{
-			"Name": "EditorScriptingUtilities",
-			"Enabled": true
-		}
-	]
+    "FileVersion": 3,
+    "Version": 11000,
+    "VersionName": "1.1.0",
+    "FriendlyName": "UnrealMCP",
+    "Description": "AI-facing Model Context Protocol integration for Unreal Editor, updated against the Unreal Engine 5.8 editor/Python API with runtime forward-compatibility discovery.",
+    "Category": "Integration",
+    "CreatedBy": "kvick / NightVibes33 fork",
+    "CreatedByURL": "https://github.com/NightVibes33/UnrealMCP",
+    "DocsURL": "https://github.com/NightVibes33/UnrealMCP#readme",
+    "MarketplaceURL": "",
+    "SupportURL": "https://github.com/NightVibes33/UnrealMCP",
+    "CanContainContent": true,
+    "IsBetaVersion": true,
+    "IsExperimentalVersion": false,
+    "Installed": false,
+    "Modules": [
+        {
+            "Name": "UnrealMCP",
+            "Type": "Editor",
+            "LoadingPhase": "PreDefault"
+        }
+    ],
+    "Plugins": [
+        {
+            "Name": "PythonScriptPlugin",
+            "Enabled": true
+        },
+        {
+            "Name": "EditorScriptingUtilities",
+            "Enabled": true
+        }
+    ]
 }

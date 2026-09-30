@@ -23,7 +23,7 @@
 #include "Widgets/Layout/SGridPanel.h"
 #include "Widgets/Layout/SUniformGridPanel.h"
 #include "Framework/Application/SlateApplication.h"
-#include "EditorStyleSet.h"
+#include "Styling/AppStyle.h"
 
 // Define the log category
 DEFINE_LOG_CATEGORY(LogMCP);

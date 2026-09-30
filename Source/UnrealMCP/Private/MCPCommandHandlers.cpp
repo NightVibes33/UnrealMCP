@@ -1,4 +1,6 @@
 #include "MCPCommandHandlers.h"
+#include "IPythonScriptPlugin.h"
+#include "PythonScriptTypes.h"
 
 #include "ActorEditorUtils.h"
 #include "Editor.h"
@@ -411,175 +413,86 @@ TSharedPtr<FJsonObject> FMCPDeleteObjectHandler::Execute(const TSharedPtr<FJsonO
 //
 TSharedPtr<FJsonObject> FMCPExecutePythonHandler::Execute(const TSharedPtr<FJsonObject> &Params, FSocket *ClientSocket)
 {
-    // Check if we have code or file parameter
     FString PythonCode;
     FString PythonFile;
-    bool hasCode = Params->TryGetStringField(FStringView(TEXT("code")), PythonCode);
-    bool hasFile = Params->TryGetStringField(FStringView(TEXT("file")), PythonFile);
+    bool bHasCode = Params->TryGetStringField(FStringView(TEXT("code")), PythonCode);
+    bool bHasFile = Params->TryGetStringField(FStringView(TEXT("file")), PythonFile);
 
-    // If code/file not found directly, check if they're in a 'data' object
-    if (!hasCode && !hasFile)
+    if (!bHasCode && !bHasFile)
     {
-        const TSharedPtr<FJsonObject> *DataObject;
-        if (Params->TryGetObjectField(FStringView(TEXT("data")), DataObject))
+        const TSharedPtr<FJsonObject>* DataObject = nullptr;
+        if (Params->TryGetObjectField(FStringView(TEXT("data")), DataObject) && DataObject && DataObject->IsValid())
         {
-            hasCode = (*DataObject)->TryGetStringField(FStringView(TEXT("code")), PythonCode);
-            hasFile = (*DataObject)->TryGetStringField(FStringView(TEXT("file")), PythonFile);
+            bHasCode = (*DataObject)->TryGetStringField(FStringView(TEXT("code")), PythonCode);
+            bHasFile = (*DataObject)->TryGetStringField(FStringView(TEXT("file")), PythonFile);
         }
     }
 
-    if (!hasCode && !hasFile)
+    if (!bHasCode && !bHasFile)
     {
         MCP_LOG_WARNING("Missing 'code' or 'file' field in execute_python command");
-        return CreateErrorResponse("Missing 'code' or 'file' field. You must provide either Python code or a file path.");
+        return CreateErrorResponse("Missing 'code' or 'file' field. Provide literal Python code or a Python file path.");
     }
 
-    FString Result;
-    bool bSuccess = false;
-    FString ErrorMessage;
-
-    if (hasCode)
+    IPythonScriptPlugin* PythonPlugin = IPythonScriptPlugin::Get();
+    if (!PythonPlugin)
     {
-        // For code execution, we'll create a temporary file and execute that
-        MCP_LOG_INFO("Executing Python code via temporary file");
-
-        // Create a temporary file in the project's Saved/Temp directory
-        FString TempDir = FPaths::ProjectSavedDir() / MCPConstants::PYTHON_TEMP_DIR_NAME;
-        IPlatformFile &PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
-
-        // Ensure the directory exists
-        if (!PlatformFile.DirectoryExists(*TempDir))
-        {
-            PlatformFile.CreateDirectory(*TempDir);
-        }
-
-        // Create a unique filename for the temporary Python script
-        FString TempFilePath = TempDir / FString::Printf(TEXT("%s%s.py"), MCPConstants::PYTHON_TEMP_FILE_PREFIX, *FGuid::NewGuid().ToString());
-
-        // Add error handling wrapper to the Python code
-        FString WrappedPythonCode = TEXT("import sys\n")
-                                        TEXT("import traceback\n")
-                                            TEXT("import unreal\n\n")
-                                                TEXT("# Create output capture file\n")
-                                                    TEXT("output_file = open('") +
-                                    TempDir + TEXT("/output.txt', 'w')\n") TEXT("error_file = open('") + TempDir + TEXT("/error.txt', 'w')\n\n") TEXT("# Store original stdout and stderr\n") TEXT("original_stdout = sys.stdout\n") TEXT("original_stderr = sys.stderr\n\n") TEXT("# Redirect stdout and stderr\n") TEXT("sys.stdout = output_file\n") TEXT("sys.stderr = error_file\n\n") TEXT("success = True\n") TEXT("try:\n")
-                                    // Instead of directly embedding the code, we'll compile it first to catch syntax errors
-                                    TEXT("    # Compile the code to catch syntax errors\n") TEXT("    user_code = '''") +
-                                    PythonCode + TEXT("'''\n") TEXT("    try:\n") TEXT("        code_obj = compile(user_code, '<string>', 'exec')\n") TEXT("        # Execute the compiled code\n") TEXT("        exec(code_obj)\n") TEXT("    except SyntaxError as e:\n") TEXT("        traceback.print_exc()\n") TEXT("        success = False\n") TEXT("    except Exception as e:\n") TEXT("        traceback.print_exc()\n") TEXT("        success = False\n") TEXT("except Exception as e:\n") TEXT("    traceback.print_exc()\n") TEXT("    success = False\n") TEXT("finally:\n") TEXT("    # Restore original stdout and stderr\n") TEXT("    sys.stdout = original_stdout\n") TEXT("    sys.stderr = original_stderr\n") TEXT("    output_file.close()\n") TEXT("    error_file.close()\n") TEXT("    # Write success status\n") TEXT("    with open('") + TempDir + TEXT("/status.txt', 'w') as f:\n") TEXT("        f.write('1' if success else '0')\n");
-
-        // Write the Python code to the temporary file
-        if (FFileHelper::SaveStringToFile(WrappedPythonCode, *TempFilePath))
-        {
-            // Execute the temporary file
-            FString Command = FString::Printf(TEXT("py \"%s\""), *TempFilePath);
-            GEngine->Exec(nullptr, *Command);
-
-            // Read the output, error, and status files
-            FString OutputContent;
-            FString ErrorContent;
-            FString StatusContent;
-
-            FFileHelper::LoadFileToString(OutputContent, *(TempDir / TEXT("output.txt")));
-            FFileHelper::LoadFileToString(ErrorContent, *(TempDir / TEXT("error.txt")));
-            FFileHelper::LoadFileToString(StatusContent, *(TempDir / TEXT("status.txt")));
-
-            bSuccess = StatusContent.TrimStartAndEnd().Equals(TEXT("1"));
-
-            // Combine output and error for the result
-            Result = OutputContent;
-            ErrorMessage = ErrorContent;
-
-            // Clean up the temporary files
-            PlatformFile.DeleteFile(*TempFilePath);
-            PlatformFile.DeleteFile(*(TempDir / TEXT("output.txt")));
-            PlatformFile.DeleteFile(*(TempDir / TEXT("error.txt")));
-            PlatformFile.DeleteFile(*(TempDir / TEXT("status.txt")));
-        }
-        else
-        {
-            MCP_LOG_ERROR("Failed to create temporary Python file at %s", *TempFilePath);
-            return CreateErrorResponse(FString::Printf(TEXT("Failed to create temporary Python file at %s"), *TempFilePath));
-        }
+        return CreateErrorResponse("PythonScriptPlugin module is not available.");
     }
-    else if (hasFile)
+    if (!PythonPlugin->IsPythonAvailable())
     {
-        // Execute Python file
-        MCP_LOG_INFO("Executing Python file: %s", *PythonFile);
-
-        // Create a temporary directory for output capture
-        FString TempDir = FPaths::ProjectSavedDir() / MCPConstants::PYTHON_TEMP_DIR_NAME;
-        IPlatformFile &PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
-
-        // Ensure the directory exists
-        if (!PlatformFile.DirectoryExists(*TempDir))
-        {
-            PlatformFile.CreateDirectory(*TempDir);
-        }
-
-        // Create a wrapper script that executes the file and captures output
-        FString WrapperFilePath = TempDir / FString::Printf(TEXT("%s_wrapper_%s.py"), MCPConstants::PYTHON_TEMP_FILE_PREFIX, *FGuid::NewGuid().ToString());
-
-        FString WrapperCode = TEXT("import sys\n")
-                                  TEXT("import traceback\n")
-                                      TEXT("import unreal\n\n")
-                                          TEXT("# Create output capture file\n")
-                                              TEXT("output_file = open('") +
-                              TempDir + TEXT("/output.txt', 'w')\n") TEXT("error_file = open('") + TempDir + TEXT("/error.txt', 'w')\n\n") TEXT("# Store original stdout and stderr\n") TEXT("original_stdout = sys.stdout\n") TEXT("original_stderr = sys.stderr\n\n") TEXT("# Redirect stdout and stderr\n") TEXT("sys.stdout = output_file\n") TEXT("sys.stderr = error_file\n\n") TEXT("success = True\n") TEXT("try:\n") TEXT("    # Read the file content\n") TEXT("    with open('") + PythonFile.Replace(TEXT("\\"), TEXT("\\\\")) + TEXT("', 'r') as f:\n") TEXT("        file_content = f.read()\n") TEXT("    # Compile the code to catch syntax errors\n") TEXT("    try:\n") TEXT("        code_obj = compile(file_content, '") + PythonFile.Replace(TEXT("\\"), TEXT("\\\\")) + TEXT("', 'exec')\n") TEXT("        # Execute the compiled code\n") TEXT("        exec(code_obj)\n") TEXT("    except SyntaxError as e:\n") TEXT("        traceback.print_exc()\n") TEXT("        success = False\n") TEXT("    except Exception as e:\n") TEXT("        traceback.print_exc()\n") TEXT("        success = False\n") TEXT("except Exception as e:\n") TEXT("    traceback.print_exc()\n") TEXT("    success = False\n") TEXT("finally:\n") TEXT("    # Restore original stdout and stderr\n") TEXT("    sys.stdout = original_stdout\n") TEXT("    sys.stderr = original_stderr\n") TEXT("    output_file.close()\n") TEXT("    error_file.close()\n") TEXT("    # Write success status\n") TEXT("    with open('") + TempDir + TEXT("/status.txt', 'w') as f:\n") TEXT("        f.write('1' if success else '0')\n");
-
-        if (FFileHelper::SaveStringToFile(WrapperCode, *WrapperFilePath))
-        {
-            // Execute the wrapper script
-            FString Command = FString::Printf(TEXT("py \"%s\""), *WrapperFilePath);
-            GEngine->Exec(nullptr, *Command);
-
-            // Read the output, error, and status files
-            FString OutputContent;
-            FString ErrorContent;
-            FString StatusContent;
-
-            FFileHelper::LoadFileToString(OutputContent, *(TempDir / TEXT("output.txt")));
-            FFileHelper::LoadFileToString(ErrorContent, *(TempDir / TEXT("error.txt")));
-            FFileHelper::LoadFileToString(StatusContent, *(TempDir / TEXT("status.txt")));
-
-            bSuccess = StatusContent.TrimStartAndEnd().Equals(TEXT("1"));
-
-            // Combine output and error for the result
-            Result = OutputContent;
-            ErrorMessage = ErrorContent;
-
-            // Clean up the temporary files
-            PlatformFile.DeleteFile(*WrapperFilePath);
-            PlatformFile.DeleteFile(*(TempDir / TEXT("output.txt")));
-            PlatformFile.DeleteFile(*(TempDir / TEXT("error.txt")));
-            PlatformFile.DeleteFile(*(TempDir / TEXT("status.txt")));
-        }
-        else
-        {
-            MCP_LOG_ERROR("Failed to create wrapper Python file at %s", *WrapperFilePath);
-            return CreateErrorResponse(FString::Printf(TEXT("Failed to create wrapper Python file at %s"), *WrapperFilePath));
-        }
+        return CreateErrorResponse("Python support is not available in this Unreal Editor session.");
+    }
+    if (!PythonPlugin->IsPythonInitialized())
+    {
+        return CreateErrorResponse("Python is configured but has not finished initializing.");
     }
 
-    // Create the response
+    FPythonCommandEx Command;
+    Command.Command = bHasCode ? PythonCode : PythonFile;
+    Command.ExecutionMode = EPythonCommandExecutionMode::ExecuteFile;
+    Command.FileExecutionScope = EPythonFileExecutionScope::Private;
+
+    MCP_LOG_INFO("Executing Python through IPythonScriptPlugin::ExecPythonCommandEx (%s)",
+        bHasCode ? TEXT("literal code") : TEXT("file"));
+
+    const bool bSuccess = PythonPlugin->ExecPythonCommandEx(Command);
+
+    FString CapturedOutput;
+    for (const FPythonLogOutputEntry& Entry : Command.LogOutput)
+    {
+        FString Line = Entry.Output;
+        if (!Line.EndsWith(TEXT("\n")))
+        {
+            Line += TEXT("\n");
+        }
+        CapturedOutput += Line;
+    }
+
+    CapturedOutput.TrimEndInline();
+
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    ResultObj->SetStringField("output", Result);
+    ResultObj->SetStringField("output", CapturedOutput);
+    ResultObj->SetStringField("command_result", Command.CommandResult);
 
     if (bSuccess)
     {
         MCP_LOG_INFO("Python execution successful");
         return CreateSuccessResponse(ResultObj);
     }
-    else
-    {
-        MCP_LOG_ERROR("Python execution failed: %s", *ErrorMessage);
-        ResultObj->SetStringField("error", ErrorMessage);
 
-        // We're returning a success response with error details rather than an error response
-        // This allows the client to still access the output and error information
-        TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
-        Response->SetStringField("status", "error");
-        Response->SetStringField("message", "Python execution failed with errors");
-        Response->SetObjectField("result", ResultObj);
-        return Response;
+    FString ErrorMessage = !Command.CommandResult.IsEmpty() ? Command.CommandResult : CapturedOutput;
+    if (ErrorMessage.IsEmpty())
+    {
+        ErrorMessage = TEXT("Python execution failed. Check Unreal's Python/output log for details.");
     }
+
+    MCP_LOG_ERROR("Python execution failed: %s", *ErrorMessage);
+    ResultObj->SetStringField("error", ErrorMessage);
+
+    TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
+    Response->SetStringField("status", "error");
+    Response->SetStringField("message", "Python execution failed");
+    Response->SetObjectField("result", ResultObj);
+    return Response;
 }

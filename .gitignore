@@ -10,10 +10,13 @@ Logs/
 *.vcxproj.user
 *.pdb
 
-# Python modules
+# Python environments and caches
+MCP/python_env/
 MCP/python_modules/
-MCP/__pycache__/
-MCP/Commands/__pycache__/
+MCP/.venv/
+.venv/
 **/__pycache__/
 *.py[cod]
 *$py.class
+.pytest_cache/
+.mypy_cache/

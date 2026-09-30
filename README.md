@@ -1,96 +1,180 @@
 # UnrealMCP
 
-**UnrealMCP is an AI-facing Model Context Protocol (MCP) integration for Unreal Engine.**
-It lets MCP-capable agents inspect and control a live Unreal Editor through structured tools.
+UnrealMCP is an **AI-facing Model Context Protocol server for Unreal Editor**.
+An MCP-capable AI client receives structured Unreal tools; the Python MCP server
+forwards editor operations to the native Unreal plugin over a loopback TCP bridge.
 
-This fork modernizes the original `kvick-games/UnrealMCP` implementation for the current MCP SDK
-and expands it from a small scene/material demo into a broader editor automation surface.
+## Current engine target
+
+This release is updated against **Epic's public Unreal Engine 5.8 documentation
+and Python API**. As of September 30, 2026, Epic's public developer site does
+not expose Unreal Engine 6 Python/C++ API documentation, so the project does not
+invent undocumented UE6 symbols.
+
+Instead, UnrealMCP 1.1 is **UE6-forward-compatible by discovery**: agents can
+query the live reflected `unreal` module, detect subsystems/plugins at runtime,
+and adapt when newer engine builds expose changed APIs.
+
+See [Docs/ENGINE_COMPATIBILITY.md](Docs/ENGINE_COMPATIBILITY.md).
 
 ## Architecture
 
 ```text
-ChatGPT / Claude / Cursor / other MCP client
-                  |
-              MCP over stdio
-                  |
-        MCP/unreal_mcp_bridge.py
-                  |
-          JSON over localhost TCP
-                  |
-         UnrealMCP C++ editor plugin
-                  |
-        Unreal Editor + Unreal Python API
+ChatGPT / Claude / Cursor / another MCP client
+                     |
+                 MCP over stdio
+                     |
+           MCP/unreal_mcp_bridge.py
+                     |
+       newline-delimited JSON over 127.0.0.1
+                     |
+           UnrealMCP C++ editor plugin
+                     |
+       Unreal Editor + reflected Python API
 ```
 
-The Python process is the actual MCP server exposed to the AI client. The Unreal plugin is a
-localhost editor bridge and native command host.
+The Python process is the MCP server. The C++ plugin is a localhost editor bridge
+and native command host.
 
-## Major capabilities
+## 1.1 tool surface
 
-- **Project/system:** engine version, project paths, current world, selections, save dirty assets, console commands
-- **Scene/actors:** list, inspect, create, delete, duplicate, select, transform, tags, reflected properties
-- **Assets:** registry search, inspect, import, duplicate, rename/move, save, delete, create folders
-- **Levels/maps:** list, inspect current level, load, create and save maps
-- **Editor/PIE:** start/stop/query PIE, viewport camera get/set, actor focus
-- **Materials:** create, modify, inspect, assign and enumerate actor material slots
-- **Blueprints:** create, inspect, modify and add event nodes through native C++ handlers
-- **Python escape hatch:** execute Unreal Python for APIs that do not yet have a dedicated tool
-- **MCP primitives:** tools, an agent-oriented capability resource, and a safe inspect/edit prompt
+### Runtime/API discovery
 
-The purpose-built tools are intentionally preferred over arbitrary Python because they give AI
-clients stable schemas and smaller, auditable actions.
+- `get_unreal_capabilities`
+- `search_unreal_python_api`
+- `describe_unreal_python_api`
+- `check_unreal_api_paths`
+- `get_enabled_plugins`
 
-## MCP compatibility
+These are the compatibility layer for plugin-specific APIs and future engine versions.
 
-The bridge targets the stable **MCP Python SDK v2** (`mcp>=2.2,<3`) and uses `MCPServer`.
-It works over stdio, so it can be launched by any MCP client that supports local stdio servers.
+### Project/system
 
-## Unreal compatibility
+- engine/Python/project/world status
+- dirty map/content package inspection
+- save dirty packages
+- selected assets/actors
+- editor console commands
 
-Target: Unreal Engine 5.5+ editor builds with the **Python Editor Script Plugin** enabled.
-Some Unreal Python APIs move between engine releases; when a dedicated wrapper is unavailable,
-`execute_python` remains the compatibility fallback.
+### Actors and components
+
+- list and inspect loaded actors
+- spawn from assets/Blueprints or UClass paths
+- transforms, tags, folders and reflected properties
+- duplicate, select and bulk delete
+- list components
+- component reflected-property editing
+- SceneComponent relative transforms
+- editor undo transactions for mutations
+
+### Assets and Content Browser
+
+- Asset Registry search
+- EditorAssetSubsystem listing/inspection
+- import, duplicate, move/rename, save and delete
+- create content directories
+- open and close native asset editors
+
+### Levels, World Partition and Data Layers
+
+- list/load/create/save maps
+- create blank **World Partition** maps
+- create maps from templates
+- inspect streaming levels
+- inspect World Partition bounds/actor descriptors
+- Data Layer enumeration through `DataLayerManager`
+- Data Layer runtime state
+- editor Data Layer visibility
+
+### Editor / viewport / PIE
+
+- start/stop/query Play-In-Editor
+- viewport camera get/set
+- viewport config keys and Game View
+- pilot/eject actor
+- viewport invalidation
+- light-map builds
+
+### Static Mesh / Nanite
+
+Uses the current `StaticMeshEditorSubsystem` rather than deprecated
+`EditorStaticMeshLibrary` calls.
+
+- LOD/section/triangle/vertex/UV inspection
+- material slots and bounds
+- Nanite state and Nanite triangle/vertex counts
+- toggle Nanite
+- CPU-access flag
+- simple collision generation
+- convex decomposition collision
+- add UV channels
+
+### Materials and Blueprints
+
+- native material create/modify/inspect handlers
+- material assignment
+- Blueprint create/modify/inspect
+- Blueprint event creation
+- raw Unreal Python fallback for unsupported editor APIs
+
+### Sequencer / VFX / PCG / validation
+
+- Level Sequence discovery, creation, inspection and editor opening
+- LevelSequenceEditorSubsystem capability discovery
+- Niagara System discovery
+- PCG Graph/component discovery
+- EditorValidatorSubsystem capability discovery and compatible asset validation
+
+## Why runtime discovery matters
+
+Epic's Python API is reflected from what the current editor exposes to
+Blueprint/C++. Plugins can add more classes and functions. If an API differs in
+a future engine version, the AI can inspect the live build instead of blindly
+calling an old method.
+
+## Requirements
+
+- Unreal Engine editor build with Python Editor Script Plugin
+- Current documented target: UE 5.8
+- Python 3.11.8 is embedded by UE 5.8 for in-editor Python
+- Python 3.10+ recommended for the external MCP bridge environment
+- MCP Python SDK v2 (`mcp>=2.2,<3`)
+
+Optional tool groups require their corresponding Unreal plugins, for example
+Niagara, PCG, Level Sequence Editor, or Data Validation.
 
 ## Install
 
-Clone this repository into your project's plugin directory:
+Clone into the project's plugin directory:
 
 ```bash
 git clone https://github.com/NightVibes33/UnrealMCP.git Plugins/UnrealMCP
 ```
 
-Regenerate project files, build your editor target, open Unreal, then enable:
+Regenerate project files and build the Unreal Editor target. Then enable
+**UnrealMCP** and the **Python Editor Script Plugin**.
 
-- UnrealMCP
-- Python Editor Script Plugin
-- Editor Scripting Utilities
+### Set up the external MCP environment
 
-In Unreal, open the **MCP Server Control Panel** from the toolbar and start the server.
-
-### Python environment
-
-From `Plugins/UnrealMCP/MCP`:
-
-**Windows**
+Windows:
 
 ```bat
-py -m venv python_env
-python_env\Scripts\python -m pip install -r requirements.txt
+MCP\setup_unreal_mcp.bat
 ```
 
-**macOS / Linux**
+macOS/Linux:
 
 ```bash
-python3 -m venv python_env
-./python_env/bin/python -m pip install -r requirements.txt
+./MCP/setup_unreal_mcp.sh
 ```
+
+Open Unreal and start the MCP bridge from the UnrealMCP toolbar/control panel.
 
 ## MCP client configuration
 
-Point the client at the Python interpreter inside `MCP/python_env` and run
-`MCP/unreal_mcp_bridge.py`.
+Any local stdio MCP client can launch the bridge.
 
-Example on Windows:
+Windows example:
 
 ```json
 {
@@ -103,7 +187,7 @@ Example on Windows:
 }
 ```
 
-Example on macOS/Linux:
+macOS/Linux example:
 
 ```json
 {
@@ -116,56 +200,36 @@ Example on macOS/Linux:
 }
 ```
 
-Optional environment overrides:
+Optional bridge overrides:
 
-- `UNREAL_MCP_HOST` — defaults to `127.0.0.1`
-- `UNREAL_MCP_PORT` — defaults to the C++ plugin port (`13377`)
-- `UNREAL_MCP_TIMEOUT` — command timeout in seconds (default `30`)
+- `UNREAL_MCP_HOST` (default `127.0.0.1`)
+- `UNREAL_MCP_PORT` (default `13377`)
+- `UNREAL_MCP_TIMEOUT` (default `30` seconds)
 
-## Tool groups
+## Transport and safety
 
-At runtime, use the MCP client's `tools/list` view for the authoritative JSON schemas.
+The native bridge binds to loopback only. Requests are newline-delimited JSON,
+accumulated across socket reads, and size-limited. Do not expose an editor-control
+bridge to untrusted networks.
 
-| Group | Representative tools |
-|---|---|
-| System | `unreal_status`, `save_all_dirty_assets`, `get_selected_assets`, `execute_console_command` |
-| Scene | `get_scene_info`, `create_object`, `modify_object`, `delete_object` |
-| Actors | `list_actors`, `get_actor_details`, `set_actor_transform`, `set_actor_tags`, `duplicate_actor`, `select_actors` |
-| Assets | `search_assets`, `get_asset_info`, `import_asset`, `duplicate_asset`, `rename_asset`, `save_asset`, `delete_asset` |
-| Levels | `get_current_level`, `list_levels`, `load_level`, `create_level`, `save_current_level` |
-| Editor | `is_pie_running`, `start_pie`, `stop_pie`, `get_viewport_camera`, `set_viewport_camera`, `focus_viewport_on_actor` |
-| Materials | `create_material`, `modify_material`, `get_material_info`, `assign_material`, `get_actor_materials` |
-| Blueprints | `create_blueprint`, `modify_blueprint`, `get_blueprint_info`, `create_blueprint_event` |
-| Advanced | `execute_python` |
-
-## Safety and transport
-
-The Unreal-side TCP listener is bound to `127.0.0.1` by default. Do not expose the editor bridge
-to untrusted networks: tools can modify and delete project content and `execute_python` can run
-arbitrary Unreal Python.
-
-Requests are newline-delimited JSON and are accumulated before parsing, so large tool payloads
-are not assumed to arrive in one TCP read.
-
-Use source control and review changes before committing them.
+Tools can mutate or delete project content and `execute_python` can run arbitrary
+Unreal Python. Keep the project under source control.
 
 ## Development
 
-Python syntax check:
+Python validation:
 
 ```bash
 python -m compileall -q MCP
+cd MCP
+python -m unittest tests.test_transport -v
 ```
 
-The command modules are discovered automatically from `MCP/Commands/commands_*.py`.
-To add a tool category, create a module with `register_all(mcp)`.
+Built-in command modules are auto-discovered from
+`MCP/Commands/commands_*.py`. Local extensions can be added under
+`MCP/UserTools`.
 
-User-specific extensions can live in `MCP/UserTools/*.py` and expose
-`register_tools(mcp, helpers)`.
+## Credits
 
-## Credits and license
-
-Based on the original MIT-licensed project by **kvick / Dreamatron Studios**:
-`kvick-games/UnrealMCP`.
-
-Existing original-source copyright and license terms remain applicable.
+Based on the original MIT-licensed UnrealMCP project by kvick / Dreamatron
+Studios, with the NightVibes33 fork extending the MCP and Unreal editor surface.
