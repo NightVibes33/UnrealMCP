@@ -1,82 +1,95 @@
-"""Utility functions for MCP commands."""
+"""TCP transport helpers for the Unreal editor bridge."""
+
+from __future__ import annotations
 
 import json
+import os
 import socket
 import sys
+from typing import Any
 
-# Constants (these will be read from MCPConstants.h)
-DEFAULT_PORT = 13377
-DEFAULT_BUFFER_SIZE = 65536
-DEFAULT_TIMEOUT = 10
+DEFAULT_HOST = os.getenv("UNREAL_MCP_HOST", "127.0.0.1")
+DEFAULT_PORT = int(os.getenv("UNREAL_MCP_PORT", "13377"))
+DEFAULT_BUFFER_SIZE = int(os.getenv("UNREAL_MCP_BUFFER_SIZE", "65536"))
+DEFAULT_TIMEOUT = float(os.getenv("UNREAL_MCP_TIMEOUT", "30"))
 
-try:
-    # Try to read the port from the C++ constants
-    import os
-    plugin_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    constants_path = os.path.join(plugin_dir, "Source", "UnrealMCP", "Public", "MCPConstants.h")
-    
-    if os.path.exists(constants_path):
-        with open(constants_path, 'r') as f:
-            constants_content = f.read()
-            
-            # Extract port from MCPConstants
-            port_match = constants_content.find("DEFAULT_PORT = ")
-            if port_match != -1:
-                port_line = constants_content[port_match:].split(';')[0]
-                DEFAULT_PORT = int(port_line.split('=')[1].strip())
-                
-            # Extract buffer size from MCPConstants
-            buffer_match = constants_content.find("DEFAULT_RECEIVE_BUFFER_SIZE = ")
-            if buffer_match != -1:
-                buffer_line = constants_content[buffer_match:].split(';')[0]
-                DEFAULT_BUFFER_SIZE = int(buffer_line.split('=')[1].strip())
-except Exception as e:
-    print(f"Warning: Could not read constants from MCPConstants.h: {e}", file=sys.stderr)
-
-def send_command(command_type, params=None):
-    """Send a command to the C++ MCP server and return the response."""
+def _load_cpp_defaults() -> tuple[int, int]:
+    port = DEFAULT_PORT
+    buffer_size = DEFAULT_BUFFER_SIZE
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(DEFAULT_TIMEOUT)
-            s.connect(("localhost", DEFAULT_PORT))
-            command = {
-                "type": command_type,
-                "params": params or {}
-            }
-            s.sendall(json.dumps(command).encode('utf-8'))
-            
-            chunks = []
-            response_data = b''
-            
+        plugin_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        constants_path = os.path.join(plugin_dir, "Source", "UnrealMCP", "Public", "MCPConstants.h")
+        if not os.path.exists(constants_path):
+            return port, buffer_size
+
+        content = open(constants_path, "r", encoding="utf-8").read()
+        port_match = re_search_int(content, "DEFAULT_PORT")
+        buffer_match = re_search_int(content, "DEFAULT_RECEIVE_BUFFER_SIZE")
+        if port_match is not None and "UNREAL_MCP_PORT" not in os.environ:
+            port = port_match
+        if buffer_match is not None and "UNREAL_MCP_BUFFER_SIZE" not in os.environ:
+            buffer_size = buffer_match
+    except Exception as exc:
+        print(f"Warning: could not read MCPConstants.h: {exc}", file=sys.stderr)
+    return port, buffer_size
+
+def re_search_int(content: str, name: str) -> int | None:
+    import re
+    match = re.search(rf"\b{name}\s*=\s*(\d+)", content)
+    return int(match.group(1)) if match else None
+
+DEFAULT_PORT, DEFAULT_BUFFER_SIZE = _load_cpp_defaults()
+
+class UnrealMCPConnectionError(RuntimeError):
+    """Raised when the Python MCP server cannot reach the Unreal editor plugin."""
+
+def send_command(
+    command_type: str,
+    params: dict[str, Any] | None = None,
+    *,
+    timeout: float = DEFAULT_TIMEOUT,
+    host: str = DEFAULT_HOST,
+    port: int = DEFAULT_PORT,
+) -> dict[str, Any]:
+    """Send one newline-delimited JSON command to the Unreal editor plugin."""
+    payload = json.dumps(
+        {"type": command_type, "params": params or {}},
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8") + b"\n"
+
+    try:
+        with socket.create_connection((host, port), timeout=timeout) as sock:
+            sock.settimeout(timeout)
+            sock.sendall(payload)
+            chunks: list[bytes] = []
+            total = 0
+
             while True:
+                chunk = sock.recv(DEFAULT_BUFFER_SIZE)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+                if total > 32 * 1024 * 1024:
+                    raise UnrealMCPConnectionError("Unreal MCP response exceeded 32 MiB")
+
+                raw = b"".join(chunks).strip()
                 try:
-                    chunk = s.recv(DEFAULT_BUFFER_SIZE)
-                    if not chunk:
-                        break
-                    chunks.append(chunk)
-                    
-                    response_data = b''.join(chunks)
-                    try:
-                        json.loads(response_data.decode('utf-8'))
-                        break
-                    except json.JSONDecodeError:
-                        continue
-                except socket.timeout:
-                    if response_data:
-                        break
-                    raise
-            
-            if not response_data:
-                raise Exception("No data received from server")
-                
-            return json.loads(response_data.decode('utf-8'))
-    except ConnectionRefusedError:
-        print(f"Error: Could not connect to Unreal MCP server on localhost:{DEFAULT_PORT}.", file=sys.stderr)
-        print("Make sure your Unreal Engine with MCP plugin is running.", file=sys.stderr)
-        raise Exception("Failed to connect to Unreal MCP server: Connection refused")
-    except socket.timeout:
-        print("Error: Connection timed out while communicating with Unreal MCP server.", file=sys.stderr)
-        raise Exception("Failed to communicate with Unreal MCP server: Connection timed out")
-    except Exception as e:
-        print(f"Error communicating with Unreal MCP server: {str(e)}", file=sys.stderr)
-        raise Exception(f"Failed to communicate with Unreal MCP server: {str(e)}") 
+                    return json.loads(raw.decode("utf-8"))
+                except json.JSONDecodeError:
+                    continue
+
+        raise UnrealMCPConnectionError("Unreal MCP closed the connection without a JSON response")
+    except (ConnectionRefusedError, TimeoutError, socket.timeout, OSError) as exc:
+        raise UnrealMCPConnectionError(
+            f"Could not communicate with Unreal MCP at {host}:{port}: {exc}"
+        ) from exc
+
+__all__ = [
+    "DEFAULT_HOST",
+    "DEFAULT_PORT",
+    "DEFAULT_TIMEOUT",
+    "UnrealMCPConnectionError",
+    "send_command",
+]

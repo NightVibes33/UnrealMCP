@@ -145,7 +145,7 @@ bool FMCPTCPServer::Start()
     MCP_LOG_WARNING("Starting MCP server on port %d", Config.Port);
     
     // Use a simple ASCII string for the socket description to avoid encoding issues
-    Listener = new FTcpListener(FIPv4Endpoint(FIPv4Address::Any, Config.Port));
+    Listener = new FTcpListener(FIPv4Endpoint(FIPv4Address(127, 0, 0, 1), Config.Port));
     if (!Listener || !Listener->IsActive())
     {
         MCP_LOG_ERROR("Failed to start MCP server on port %d", Config.Port);
@@ -227,33 +227,30 @@ bool FMCPTCPServer::HandleConnectionAccepted(FSocket* InSocket, const FIPv4Endpo
 
 void FMCPTCPServer::ProcessClientData()
 {
-    // Make a copy of the array since we might modify it during iteration
-    TArray<FMCPClientConnection> ConnectionsCopy = ClientConnections;
-    
-    for (FMCPClientConnection& ClientConnection : ConnectionsCopy)
+    // Iterate backwards so a disconnected client can be removed safely in-place.
+    for (int32 Index = ClientConnections.Num() - 1; Index >= 0; --Index)
     {
-        if (!ClientConnection.Socket) continue;
-        
-        // Check if the client is still connected
+        FMCPClientConnection& ClientConnection = ClientConnections[Index];
+        if (!ClientConnection.Socket)
+        {
+            continue;
+        }
+
         uint32 PendingDataSize = 0;
         if (!ClientConnection.Socket->HasPendingData(PendingDataSize))
         {
-            // Try to check connection status
             uint8 DummyBuffer[1];
             int32 BytesRead = 0;
-            
             bool bConnectionLost = false;
-            
+
             try
             {
                 if (!ClientConnection.Socket->Recv(DummyBuffer, 1, BytesRead, ESocketReceiveFlags::Peek))
                 {
-                    // Check if it's a real error or just a non-blocking socket that would block
-                    int32 ErrorCode = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->GetLastErrorCode();
+                    const int32 ErrorCode = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->GetLastErrorCode();
                     if (ErrorCode != SE_EWOULDBLOCK)
                     {
-                        // Real connection error
-                        MCP_LOG_INFO("Client connection from %s appears to be closed (error code %d), cleaning up", 
+                        MCP_LOG_INFO("Client connection from %s appears to be closed (error code %d), cleaning up",
                             *ClientConnection.Endpoint.ToString(), ErrorCode);
                         bConnectionLost = true;
                     }
@@ -261,58 +258,92 @@ void FMCPTCPServer::ProcessClientData()
             }
             catch (...)
             {
-                MCP_LOG_ERROR("Exception while checking client connection status for %s", 
+                MCP_LOG_ERROR("Exception while checking client connection status for %s",
                     *ClientConnection.Endpoint.ToString());
                 bConnectionLost = true;
             }
-            
+
             if (bConnectionLost)
             {
                 CleanupClientConnection(ClientConnection);
-                continue; // Skip to the next client
+                continue;
             }
         }
-        
-        // Reset PendingDataSize and check again to ensure we have the latest value
+
         PendingDataSize = 0;
-        if (ClientConnection.Socket->HasPendingData(PendingDataSize))
+        if (!ClientConnection.Socket->HasPendingData(PendingDataSize))
         {
+            continue;
+        }
+
+        if (Config.bEnableVerboseLogging)
+        {
+            MCP_LOG_VERBOSE("Client from %s has %u bytes of pending data",
+                *ClientConnection.Endpoint.ToString(), PendingDataSize);
+        }
+
+        ClientConnection.TimeSinceLastActivity = 0.0f;
+
+        int32 BytesRead = 0;
+        if (ClientConnection.Socket->Recv(
+                ClientConnection.ReceiveBuffer.GetData(),
+                ClientConnection.ReceiveBuffer.Num() - 1,
+                BytesRead))
+        {
+            if (BytesRead <= 0)
+            {
+                continue;
+            }
+
             if (Config.bEnableVerboseLogging)
             {
-                MCP_LOG_VERBOSE("Client from %s has %u bytes of pending data", 
-                    *ClientConnection.Endpoint.ToString(), PendingDataSize);
+                MCP_LOG_VERBOSE("Read %d bytes from client %s", BytesRead, *ClientConnection.Endpoint.ToString());
             }
-            
-            // Reset timeout timer since we're receiving data
-            ClientConnection.TimeSinceLastActivity = 0.0f;
-            
-            int32 BytesRead = 0;
-            if (ClientConnection.Socket->Recv(ClientConnection.ReceiveBuffer.GetData(), ClientConnection.ReceiveBuffer.Num(), BytesRead))
+
+            ClientConnection.ReceiveBuffer[BytesRead] = 0;
+            ClientConnection.PendingData += FString(UTF8_TO_TCHAR(ClientConnection.ReceiveBuffer.GetData()));
+
+            if (ClientConnection.PendingData.Len() > 16 * 1024 * 1024)
             {
-                if (BytesRead > 0)
+                MCP_LOG_WARNING("Client request exceeded 16 MiB; disconnecting %s",
+                    *ClientConnection.Endpoint.ToString());
+                CleanupClientConnection(ClientConnection);
+                continue;
+            }
+
+            // Preferred framing: one UTF-8 JSON object per line.
+            int32 NewlineIndex = INDEX_NONE;
+            while (ClientConnection.PendingData.FindChar(TEXT('\n'), NewlineIndex))
+            {
+                FString CommandJson = ClientConnection.PendingData.Left(NewlineIndex).TrimStartAndEnd();
+                ClientConnection.PendingData.RightChopInline(NewlineIndex + 1, false);
+                if (!CommandJson.IsEmpty())
                 {
-                    if (Config.bEnableVerboseLogging)
-                    {
-                        MCP_LOG_VERBOSE("Read %d bytes from client %s", BytesRead, *ClientConnection.Endpoint.ToString());
-                    }
-                    
-                    // Null-terminate the buffer to ensure it's a valid string
-                    ClientConnection.ReceiveBuffer[BytesRead] = 0;
-                    FString ReceivedData = FString(UTF8_TO_TCHAR(ClientConnection.ReceiveBuffer.GetData()));
-                    ProcessCommand(ReceivedData, ClientConnection.Socket);
+                    ProcessCommand(CommandJson, ClientConnection.Socket);
                 }
             }
-            else
+
+            // Backward compatibility with the original client, which sent one bare JSON object
+            // without a newline. Only dispatch once the accumulated string parses completely.
+            if (!ClientConnection.PendingData.IsEmpty())
             {
-                // Check if it's a real error or just a non-blocking socket that would block
-                int32 ErrorCode = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->GetLastErrorCode();
-                if (ErrorCode != SE_EWOULDBLOCK)
+                TSharedPtr<FJsonObject> ParsedObject;
+                TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ClientConnection.PendingData);
+                if (FJsonSerializer::Deserialize(Reader, ParsedObject) && ParsedObject.IsValid())
                 {
-                    // Real connection error, close the socket
-                    MCP_LOG_WARNING("Socket error %d for client %s, closing connection", 
-                        ErrorCode, *ClientConnection.Endpoint.ToString());
-                    CleanupClientConnection(ClientConnection);
+                    ProcessCommand(ClientConnection.PendingData, ClientConnection.Socket);
+                    ClientConnection.PendingData.Empty();
                 }
+            }
+        }
+        else
+        {
+            const int32 ErrorCode = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->GetLastErrorCode();
+            if (ErrorCode != SE_EWOULDBLOCK)
+            {
+                MCP_LOG_WARNING("Socket error %d for client %s, closing connection",
+                    ErrorCode, *ClientConnection.Endpoint.ToString());
+                CleanupClientConnection(ClientConnection);
             }
         }
     }
@@ -320,20 +351,20 @@ void FMCPTCPServer::ProcessClientData()
 
 void FMCPTCPServer::CheckClientTimeouts(float DeltaTime)
 {
-    // Make a copy of the array since we might modify it during iteration
-    TArray<FMCPClientConnection> ConnectionsCopy = ClientConnections;
-    
-    for (FMCPClientConnection& ClientConnection : ConnectionsCopy)
+    // Update the real connection records; the old implementation updated a copy,
+    // so idle time never accumulated across ticks.
+    for (int32 Index = ClientConnections.Num() - 1; Index >= 0; --Index)
     {
-        if (!ClientConnection.Socket) continue;
-        
-        // Increment time since last activity
+        FMCPClientConnection& ClientConnection = ClientConnections[Index];
+        if (!ClientConnection.Socket)
+        {
+            continue;
+        }
+
         ClientConnection.TimeSinceLastActivity += DeltaTime;
-        
-        // Check if client has timed out
         if (ClientConnection.TimeSinceLastActivity > Config.ClientTimeoutSeconds)
         {
-            MCP_LOG_WARNING("Client from %s timed out after %.1f seconds of inactivity, disconnecting", 
+            MCP_LOG_WARNING("Client from %s timed out after %.1f seconds of inactivity, disconnecting",
                 *ClientConnection.Endpoint.ToString(), ClientConnection.TimeSinceLastActivity);
             CleanupClientConnection(ClientConnection);
         }

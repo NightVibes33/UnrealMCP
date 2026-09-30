@@ -1,0 +1,29 @@
+name: Python MCP checks
+
+on:
+  push:
+    branches: ["master"]
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: "MCP/requirements.txt"
+      - run: python -m pip install -r MCP/requirements.txt
+      - run: python -m compileall -q MCP
+      - name: Import and register all command modules
+        run: |
+          python - <<'PY'
+          import sys
+          sys.path.insert(0, "MCP")
+          import unreal_mcp_bridge
+          count = unreal_mcp_bridge.load_commands()
+          assert count >= 8, count
+          print(f"registered {count} command modules")
+          PY

@@ -1,211 +1,171 @@
-# UnrealMCP Plugin
+# UnrealMCP
 
+**UnrealMCP is an AI-facing Model Context Protocol (MCP) integration for Unreal Engine.**
+It lets MCP-capable agents inspect and control a live Unreal Editor through structured tools.
 
-[![Discord][discord-shield]][discord-url]
+This fork modernizes the original `kvick-games/UnrealMCP` implementation for the current MCP SDK
+and expands it from a small scene/material demo into a broader editor automation surface.
 
-[discord-shield]: https://img.shields.io/badge/Discord-Join-5865F2?style=flat&logo=discord&logoColor=white
-[discord-url]: https://discord.gg/ThkpVxdzet
+## Architecture
 
+```text
+ChatGPT / Claude / Cursor / other MCP client
+                  |
+              MCP over stdio
+                  |
+        MCP/unreal_mcp_bridge.py
+                  |
+          JSON over localhost TCP
+                  |
+         UnrealMCP C++ editor plugin
+                  |
+        Unreal Editor + Unreal Python API
+```
 
-# VERY WIP REPO
-I'm working on adding more tools now and cleaning up the codebase, 
-I plan to allow for easy tool extension outside the main plugin
+The Python process is the actual MCP server exposed to the AI client. The Unreal plugin is a
+localhost editor bridge and native command host.
 
-This is very much a work in progress, and I need to clean up a lot of stuff!!!!!
+## Major capabilities
 
-Also, I only use windows, so I don't know how this would be setup for mac/unix
+- **Project/system:** engine version, project paths, current world, selections, save dirty assets, console commands
+- **Scene/actors:** list, inspect, create, delete, duplicate, select, transform, tags, reflected properties
+- **Assets:** registry search, inspect, import, duplicate, rename/move, save, delete, create folders
+- **Levels/maps:** list, inspect current level, load, create and save maps
+- **Editor/PIE:** start/stop/query PIE, viewport camera get/set, actor focus
+- **Materials:** create, modify, inspect, assign and enumerate actor material slots
+- **Blueprints:** create, inspect, modify and add event nodes through native C++ handlers
+- **Python escape hatch:** execute Unreal Python for APIs that do not yet have a dedicated tool
+- **MCP primitives:** tools, an agent-oriented capability resource, and a safe inspect/edit prompt
 
-## Overview
-UnrealMCP is an Unofficial Unreal Engine plugin designed to control Unreal Engine with AI tools. It implements a Machine Control Protocol (MCP) within Unreal Engine, allowing external AI systems to interact with and manipulate the Unreal environment programmatically.
+The purpose-built tools are intentionally preferred over arbitrary Python because they give AI
+clients stable schemas and smaller, auditable actions.
 
-I only just learned about MCP a few days ago, so I'm not that familiar with it, I'm still learning so things might be initially pretty rough.
-I've implemented this using https://github.com/ahujasid/blender-mcp as a reference, which relies on claude for desktop. It may or may not work with other models, if you experiment with any, please let me know!
+## MCP compatibility
 
-## ⚠️ DISCLAIMER
-This plugin allows AI agents to directly modify your Unreal Engine project. While it can be a powerful tool, it also comes with risks:
+The bridge targets the stable **MCP Python SDK v2** (`mcp>=2.2,<3`) and uses `MCPServer`.
+It works over stdio, so it can be launched by any MCP client that supports local stdio servers.
 
-- AI agents may make unexpected changes to your project
-- Files could be accidentally deleted or modified
-- Project settings could be altered
-- Assets could be overwritten
+## Unreal compatibility
 
-**IMPORTANT SAFETY MEASURES:**
-1. Always use source control (like Git or Perforce) with your project
-2. Make regular backups of your project
-3. Test the plugin in a separate project first
-4. Review changes before committing them
+Target: Unreal Engine 5.5+ editor builds with the **Python Editor Script Plugin** enabled.
+Some Unreal Python APIs move between engine releases; when a dedicated wrapper is unavailable,
+`execute_python` remains the compatibility fallback.
 
-By using this plugin, you acknowledge that:
-- You are solely responsible for any changes made to your project
-- The plugin author is not responsible for any damage, data loss, or issues caused by AI agents
-- You use this plugin at your own risk
+## Install
 
-## Features
-- TCP server implementation for remote control of Unreal Engine
-- JSON-based command protocol for AI tools integration
-- Editor UI integration for easy access to MCP functionality
-- Comprehensive scene manipulation capabilities
-- Python companion scripts for client-side interaction
+Clone this repository into your project's plugin directory:
 
-## Roadmap
-These are what I have in mind for development as of 3/14/2025
-I'm not sure what's possible yet, in theory anything, but it depends on how
-good the integrated LLM is at utilizing these tools.
-- [X] Basic operations working
-- [X] Python working
-- [X] Materials
-- [ ] User Extensions (in progress)
-- [ ] Asset tools
-- [ ] Blueprints
-- [ ] Niagara VFX
-- [ ] Metasound
-- [ ] Landscape (I might hold off on this because Epic has mentioned they are going to be updating the landscape tools)
-- [ ] Modeling Tools
-- [ ] PCG
+```bash
+git clone https://github.com/NightVibes33/UnrealMCP.git Plugins/UnrealMCP
+```
 
-## Requirements
-- Unreal Engine 5.5 (I have only tested on this version, may work with earlier, but no official support)
-- C++ development environment configured for Unreal Engine
-- Python 3.7+ for client-side scripting
-- Model to run the commands, in testing I've been using Claude for Desktop https://claude.ai/download
+Regenerate project files, build your editor target, open Unreal, then enable:
 
-## Installation
-1. Clone this repository into your Unreal project's `Plugins` directory:
-   ```
-   git clone https://github.com/kvick-games/UnrealMCP.git Plugins/UnrealMCP
-   ```
-   The project path should match this pattern like so:
-...\UNREAL_PROJECT\Plugins\UnrealMCP\
+- UnrealMCP
+- Python Editor Script Plugin
+- Editor Scripting Utilities
 
-3. Regenerate your project files (right-click your .uproject file and select "Generate Visual Studio project files")
-4. Build the project in whatever IDE you use, I use Rider, Visual Studio works (working on releases now)
-5. Open your project and enable the plugin in Edit > Plugins > UnrealMCP
-6. Enable Python plugins in Unreal
-7. Run setup_unreal_mcp.bat (I probably need to make some fixes to this file as more people try it out)
-8. Currently I've only tested with Claude for Desktop so follow the instructions below to continue
+In Unreal, open the **MCP Server Control Panel** from the toolbar and start the server.
 
-## With Claude for Desktop
-You will need to find your installation directory for claude for desktop. Find claude_desktop_config.json and add an entry and make it look like so:
+### Python environment
+
+From `Plugins/UnrealMCP/MCP`:
+
+**Windows**
+
+```bat
+py -m venv python_env
+python_env\Scripts\python -m pip install -r requirements.txt
+```
+
+**macOS / Linux**
+
+```bash
+python3 -m venv python_env
+./python_env/bin/python -m pip install -r requirements.txt
+```
+
+## MCP client configuration
+
+Point the client at the Python interpreter inside `MCP/python_env` and run
+`MCP/unreal_mcp_bridge.py`.
+
+Example on Windows:
+
 ```json
 {
-    "mcpServers": {
-        "unreal": {
-            "command": "C:\\UnrealMCP_Project\\Plugins\\UnrealMCP\\MCP\\run_unreal_mcp.bat",
-            "args": []
-        }
+  "mcpServers": {
+    "unreal": {
+      "command": "C:\\YourProject\\Plugins\\UnrealMCP\\MCP\\python_env\\Scripts\\python.exe",
+      "args": ["C:\\YourProject\\Plugins\\UnrealMCP\\MCP\\unreal_mcp_bridge.py"]
     }
+  }
 }
 ```
-IN THE COMMAND FIELD PUT YOUR PATH TO YOUR PLUGIN DIRECTORY POINTED TO THE SCRIPT: "run_unreal_mcp.bat"
-This script is located within ../plugin_root_directory/MCP/run_unreal_mcp.bat
 
-You can refer to this link for more info:
-https://modelcontextprotocol.io/quickstart/user
+Example on macOS/Linux:
 
-To find the path to your claude for desktop install you can go into settings and click 'Edit Config'
-On my Windows PC the path is:
-C:\Users\USERNAME\AppData\Roaming\Claude
-
-## Usage
-### In Unreal Editor
-Once the plugin is enabled, you'll find MCP controls in the editor toolbar button. 
-![image](https://github.com/user-attachments/assets/68338e7a-090d-4fd9-acc9-37c0c1b63227)
-
-![image](https://github.com/user-attachments/assets/34f734ee-65a4-448a-a6db-9e941a588e93)
-
-The TCP server can be started/stopped from here.
-Check the output log under log filter LogMCP for extra information.
-
-Once the server is confirmed up and running from the editor.
-Open Claude for Desktop, ensure that the tools have successfully enabled, ask Claude to work in unreal.
-
-Currently only basic operations are supported, creating objects, modfiying their transforms, getting scene info, and running python scripts.
-Claude makes a lot of errors with unreal python as I believe there aren't a ton of examples for it, but let it run and it will usually figure things out.
-I would really like to improve this aspect of how it works but it's low hanging fruit for adding functionality into unreal.
-
-### Client-Side Integration
-Use the provided Python scripts in the `MCP` directory to connect to and control your Unreal Engine instance:
-
-```python
-from unreal_mcp_client import UnrealMCPClient
-
-# Connect to the Unreal MCP server
-client = UnrealMCPClient("localhost", 13377)
-
-# Example: Create a cube in the scene
-client.create_object(
-    class_name="StaticMeshActor",
-    asset_path="/Engine/BasicShapes/Cube.Cube",
-    location=(0, 0, 100),
-    rotation=(0, 0, 0),
-    scale=(1, 1, 1),
-    name="MCP_Cube"
-)
+```json
+{
+  "mcpServers": {
+    "unreal": {
+      "command": "/path/to/Plugins/UnrealMCP/MCP/python_env/bin/python",
+      "args": ["/path/to/Plugins/UnrealMCP/MCP/unreal_mcp_bridge.py"]
+    }
+  }
+}
 ```
 
-## Command Reference
-The plugin supports various commands for scene manipulation:
-- `get_scene_info`: Retrieve information about the current scene
-- `create_object`: Spawn a new object in the scene
-- `delete_object`: Remove an object from the scene
-- `modify_object`: Change properties of an existing object
-- `execute_python`: Run Python commands in Unreal's Python environment
-- And more to come...
+Optional environment overrides:
 
-Refer to the documentation in the `Docs` directory for a complete command reference.
+- `UNREAL_MCP_HOST` — defaults to `127.0.0.1`
+- `UNREAL_MCP_PORT` — defaults to the C++ plugin port (`13377`)
+- `UNREAL_MCP_TIMEOUT` — command timeout in seconds (default `30`)
 
-## Security Considerations
-- The MCP server accepts connections from any client by default
-- Limit server exposure to localhost for development
-- Validate all incoming commands to prevent injection attacks
+## Tool groups
 
-## Troubleshooting
-- Ensure Unreal Engine is running with the MCP plugin.
-- Check logs in Claude for Desktop for stderr output.
-- Reach out on the discord, I just made it, but I will check it periodically
-  Discord (Dreamatron Studios): https://discord.gg/abRftdSe
-  
-### Project Structure
-- `Source/UnrealMCP/`: Core plugin implementation
-  - `Private/`: Internal implementation files
-  - `Public/`: Public header files
-- `Content/`: Plugin assets
-- `MCP/`: Python client scripts and examples
-- `Resources/`: Icons and other resources
+At runtime, use the MCP client's `tools/list` view for the authoritative JSON schemas.
 
-## License
-MIT License
+| Group | Representative tools |
+|---|---|
+| System | `unreal_status`, `save_all_dirty_assets`, `get_selected_assets`, `execute_console_command` |
+| Scene | `get_scene_info`, `create_object`, `modify_object`, `delete_object` |
+| Actors | `list_actors`, `get_actor_details`, `set_actor_transform`, `set_actor_tags`, `duplicate_actor`, `select_actors` |
+| Assets | `search_assets`, `get_asset_info`, `import_asset`, `duplicate_asset`, `rename_asset`, `save_asset`, `delete_asset` |
+| Levels | `get_current_level`, `list_levels`, `load_level`, `create_level`, `save_current_level` |
+| Editor | `is_pie_running`, `start_pie`, `stop_pie`, `get_viewport_camera`, `set_viewport_camera`, `focus_viewport_on_actor` |
+| Materials | `create_material`, `modify_material`, `get_material_info`, `assign_material`, `get_actor_materials` |
+| Blueprints | `create_blueprint`, `modify_blueprint`, `get_blueprint_info`, `create_blueprint_event` |
+| Advanced | `execute_python` |
 
-Copyright (c) 2025 kvick
+## Safety and transport
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+The Unreal-side TCP listener is bound to `127.0.0.1` by default. Do not expose the editor bridge
+to untrusted networks: tools can modify and delete project content and `execute_python` can run
+arbitrary Unreal Python.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Requests are newline-delimited JSON and are accumulated before parsing, so large tool payloads
+are not assumed to arrive in one TCP read.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+Use source control and review changes before committing them.
 
-## Credits
-- Created by: kvick
-- X: [@kvickart](https://x.com/kvickart)
-  
-### Thank you to testers!!!
-- https://github.com/TheMurphinatur
-  
-- [@sidahuj](https://x.com/sidahuj) for the inspriation
+## Development
 
+Python syntax check:
 
+```bash
+python -m compileall -q MCP
+```
 
-## Contributing
-Contributions are welcome, but I will need some time to wrap my head around things and cleanup first, lol
+The command modules are discovered automatically from `MCP/Commands/commands_*.py`.
+To add a tool category, create a module with `register_all(mcp)`.
+
+User-specific extensions can live in `MCP/UserTools/*.py` and expose
+`register_tools(mcp, helpers)`.
+
+## Credits and license
+
+Based on the original MIT-licensed project by **kvick / Dreamatron Studios**:
+`kvick-games/UnrealMCP`.
+
+Existing original-source copyright and license terms remain applicable.

@@ -1,112 +1,73 @@
-"""Material-related commands for Unreal Engine.
+"""Material creation, inspection and assignment tools."""
 
-This module contains all material-related commands for the UnrealMCP bridge,
-including creation, modification, and querying of materials.
-"""
+from __future__ import annotations
+from typing import Any
+from utils import run_unreal_json, send_command
 
-import sys
-import os
-import importlib.util
-import importlib
-from mcp.server.fastmcp import Context
-
-# Import send_command from the parent module
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from unreal_mcp_bridge import send_command
+def _render(response):
+    return response.get("result") if response.get("status") == "success" else response
 
 def register_all(mcp):
-    """Register all material-related commands with the MCP server."""
-    
-    # Create material command
     @mcp.tool()
-    def create_material(ctx: Context, package_path: str, name: str, properties: dict = None) -> str:
-        """Create a new material in the Unreal project.
-        
-        Args:
-            package_path: The path where the material should be created (e.g., '/Game/Materials')
-            name: The name of the material
-            properties: Optional dictionary of material properties to set. Can include:
-                - shading_model: str (e.g., "DefaultLit", "Unlit", "Subsurface", etc.)
-                - blend_mode: str (e.g., "Opaque", "Masked", "Translucent", etc.)
-                - two_sided: bool
-                - dithered_lod_transition: bool
-                - cast_contact_shadow: bool
-                - base_color: list[float] (RGBA values 0-1)
-                - metallic: float (0-1)
-                - roughness: float (0-1)
-        """
-        try:
-            params = {
-                "package_path": package_path,
-                "name": name
-            }
-            if properties:
-                params["properties"] = properties
-            response = send_command("create_material", params)
-            if response["status"] == "success":
-                return f"Created material: {response['result']['name']} at path: {response['result']['path']}"
-            else:
-                return f"Error: {response['message']}"
-        except Exception as e:
-            return f"Error creating material: {str(e)}"
+    def create_material(package_path: str, name: str, properties: dict[str, Any] | None = None) -> dict:
+        """Create a Material asset."""
+        return _render(send_command("create_material", {
+            "package_path": package_path,
+            "name": name,
+            "properties": properties or {},
+        }))
 
-    # Modify material command
     @mcp.tool()
-    def modify_material(ctx: Context, path: str, properties: dict) -> str:
-        """Modify an existing material's properties.
-        
-        Args:
-            path: The full path to the material (e.g., '/Game/Materials/MyMaterial')
-            properties: Dictionary of material properties to set. Can include:
-                - shading_model: str (e.g., "DefaultLit", "Unlit", "Subsurface", etc.)
-                - blend_mode: str (e.g., "Opaque", "Masked", "Translucent", etc.)
-                - two_sided: bool
-                - dithered_lod_transition: bool
-                - cast_contact_shadow: bool
-                - base_color: list[float] (RGBA values 0-1)
-                - metallic: float (0-1)
-                - roughness: float (0-1)
-        """
-        try:
-            params = {
-                "path": path,
-                "properties": properties
-            }
-            response = send_command("modify_material", params)
-            if response["status"] == "success":
-                return f"Modified material: {response['result']['name']} at path: {response['result']['path']}"
-            else:
-                return f"Error: {response['message']}"
-        except Exception as e:
-            return f"Error modifying material: {str(e)}"
+    def modify_material(path: str, properties: dict[str, Any]) -> dict:
+        """Modify supported Material properties."""
+        return _render(send_command("modify_material", {"path": path, "properties": properties}))
 
-    # Get material info command
     @mcp.tool()
-    def get_material_info(ctx: Context, path: str) -> dict:
-        """Get information about a material.
-        
-        Args:
-            path: The full path to the material (e.g., '/Game/Materials/MyMaterial')
-            
-        Returns:
-            Dictionary containing material information including:
-                - name: str
-                - path: str
-                - shading_model: str
-                - blend_mode: str
-                - two_sided: bool
-                - dithered_lod_transition: bool
-                - cast_contact_shadow: bool
-                - base_color: list[float]
-                - metallic: float
-                - roughness: float
-        """
-        try:
-            params = {"path": path}
-            response = send_command("get_material_info", params)
-            if response["status"] == "success":
-                return response["result"]
-            else:
-                return {"error": response["message"]}
-        except Exception as e:
-            return {"error": str(e)} 
+    def get_material_info(path: str) -> dict:
+        """Inspect a Material asset."""
+        return _render(send_command("get_material_info", {"path": path}))
+
+    @mcp.tool()
+    def assign_material(actor_label: str, material_path: str, slot: int = 0) -> dict:
+        """Assign a material to the first primitive component on an actor."""
+        return run_unreal_json(
+            """
+            actor_subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+            actor = next((a for a in actor_subsystem.get_all_level_actors()
+                          if a.get_actor_label() == args["actor_label"] or a.get_name() == args["actor_label"]), None)
+            if actor is None:
+                raise RuntimeError(f'Actor not found: {args["actor_label"]}')
+            material = unreal.load_asset(args["material_path"])
+            if material is None:
+                raise RuntimeError(f'Material not found: {args["material_path"]}')
+            primitive = next((c for c in actor.get_components_by_class(unreal.PrimitiveComponent)), None)
+            if primitive is None:
+                raise RuntimeError("Actor has no PrimitiveComponent")
+            primitive.set_material(int(args["slot"]), material)
+            result = {"actor": actor.get_actor_label(), "material": material.get_path_name(), "slot": int(args["slot"])}
+            """,
+            {"actor_label": actor_label, "material_path": material_path, "slot": slot},
+        )
+
+    @mcp.tool()
+    def get_actor_materials(actor_label: str) -> list[dict]:
+        """List material slots on an actor's primitive components."""
+        return run_unreal_json(
+            """
+            actor_subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+            actor = next((a for a in actor_subsystem.get_all_level_actors()
+                          if a.get_actor_label() == args["actor_label"] or a.get_name() == args["actor_label"]), None)
+            if actor is None:
+                raise RuntimeError(f'Actor not found: {args["actor_label"]}')
+            items = []
+            for component in actor.get_components_by_class(unreal.PrimitiveComponent):
+                for index, material in enumerate(component.get_materials()):
+                    items.append({
+                        "component": component.get_name(),
+                        "slot": index,
+                        "material": material.get_path_name() if material else None,
+                    })
+            result = items
+            """,
+            {"actor_label": actor_label},
+        )

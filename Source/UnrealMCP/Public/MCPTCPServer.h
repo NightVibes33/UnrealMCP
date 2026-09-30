@@ -44,8 +44,11 @@ struct FMCPClientConnection
     /** Time since last activity for timeout tracking */
     float TimeSinceLastActivity;
     
-    /** Buffer for receiving data */
+    /** Buffer for receiving the next socket chunk. */
     TArray<uint8> ReceiveBuffer;
+
+    /** Accumulates partial newline-delimited JSON requests across socket reads. */
+    FString PendingData;
 
     /**
      * Constructor
@@ -58,7 +61,7 @@ struct FMCPClientConnection
         , Endpoint(InEndpoint)
         , TimeSinceLastActivity(0.0f)
     {
-        ReceiveBuffer.SetNumUninitialized(BufferSize);
+        ReceiveBuffer.SetNumUninitialized(BufferSize + 1);
     }
 };
 

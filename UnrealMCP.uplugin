@@ -1,9 +1,9 @@
 {
 	"FileVersion": 3,
-	"Version": 1,
-	"VersionName": "0.1.0",
+	"Version": 10000,
+	"VersionName": "1.0.0",
 	"FriendlyName": "UnrealMCP",
-	"Description": "A plugin to control Unreal with AI Tools. Implements MCP in Unreal ",
+	"Description": "AI-facing Model Context Protocol integration for controlling and inspecting Unreal Editor.",
 	"Category": "Integration",
 	"CreatedBy": "kvick",
 	"CreatedByURL": "https://x.com/kvickart",
@@ -16,9 +16,19 @@
 	"Installed": false,
 	"Modules": [
 		{
-            "Name": "UnrealMCP",
-            "Type": "Editor",
-            "LoadingPhase": "PreDefault"
-        }
+			"Name": "UnrealMCP",
+			"Type": "Editor",
+			"LoadingPhase": "PreDefault"
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "PythonScriptPlugin",
+			"Enabled": true
+		},
+		{
+			"Name": "EditorScriptingUtilities",
+			"Enabled": true
+		}
 	]
 }

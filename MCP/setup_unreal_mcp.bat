@@ -70,11 +70,11 @@ if %ERRORLEVEL% neq 0 (
 
 REM Install MCP package in the virtual environment
 echo Installing MCP package...
-python -m pip install mcp>=0.1.0
+python -m pip install -r "%SCRIPT_DIR%\requirements.txt"
 
 REM Also install to modules directory as a backup
 echo Installing MCP package to modules directory as backup...
-python -m pip install mcp>=0.1.0 -t "%MODULES_DIR%"
+python -m pip install -r "%SCRIPT_DIR%\requirements.txt" -t "%MODULES_DIR%"
 
 REM Verify installation
 echo.
