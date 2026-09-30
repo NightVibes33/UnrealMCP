@@ -86,7 +86,7 @@ def load_user_tools() -> int:
 def capabilities() -> str:
     """High-level capability map for agents."""
     return (
-        "UnrealMCP 1.2 provides project/system, live API discovery and dynamic invocation, actor/component, asset, "
+        "UnrealMCP 1.2.1 provides project/system, live API discovery and dynamic invocation, actor/component, asset, "
         "level/world-partition/data-layer, editor/PIE/viewport, static-mesh/Nanite/collision, "
         "material, Blueprint, Level Sequence, Niagara/PCG discovery, validation and Unreal "
         "Python escape-hatch tools. Use tools/list for exact schemas and get_unreal_capabilities "

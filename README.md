@@ -36,7 +36,7 @@ ChatGPT / Claude / Cursor / another MCP client
 The Python process is the MCP server. The C++ plugin is a localhost editor bridge
 and native command host.
 
-## 1.2 tool surface
+## 1.2.1 tool surface
 
 ### Runtime/API discovery
 

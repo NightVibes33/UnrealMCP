@@ -49,6 +49,21 @@ jobs:
         run: |
           ruby -e 'require "yaml"; Dir[".github/workflows/*.{yml,yaml}"].sort.each { |f| YAML.safe_load(File.read(f), aliases: true); puts "parsed #{f}" }'
 
+      - name: PowerShell syntax check
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "Automation/run_unreal_validation.ps1"),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+
       - name: Modernization and self-update guards
         run: |
           ! grep -R 'EditorStyleSet.h' Source/UnrealMCP

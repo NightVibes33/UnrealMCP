@@ -37,11 +37,13 @@ function Add-EngineCandidate(
     }
 
     $editor = Join-Path $resolved "Engine\Binaries\Win64\UnrealEditor-Cmd.exe"
+    $interactiveEditor = Join-Path $resolved "Engine\Binaries\Win64\UnrealEditor.exe"
     $uat = Join-Path $resolved "Engine\Build\BatchFiles\RunUAT.bat"
-    if ((Test-Path $editor) -and (Test-Path $uat)) {
+    if ((Test-Path $editor) -and (Test-Path $interactiveEditor) -and (Test-Path $uat)) {
         [void]$List.Add([pscustomobject]@{
             Root = $resolved
             Editor = $editor
+            InteractiveEditor = $interactiveEditor
             RunUAT = $uat
             Version = Get-VersionFromText ($VersionHint + " " + $resolved)
         })
@@ -135,6 +137,7 @@ $engine = Select-Engine
 $EngineRoot = $engine.Root
 $RunUAT = $engine.RunUAT
 $Editor = $engine.Editor
+$InteractiveEditor = $engine.InteractiveEditor
 
 Write-Host "Using Unreal Engine: $EngineRoot"
 Write-Host "Install version hint: $($engine.Version)"
@@ -147,7 +150,7 @@ $pluginDir = Join-Path $projectDir "Plugins\UnrealMCP"
 New-Item -ItemType Directory -Force -Path $packageDir, $pluginDir | Out-Null
 
 Write-Host "Building UnrealMCP with RunUAT BuildPlugin..."
-& $RunUAT BuildPlugin "-Plugin=$RepoRoot\UnrealMCP.uplugin" "-Package=$packageDir" -TargetPlatforms=Win64 -Rocket
+& $RunUAT BuildPlugin "-Plugin=$RepoRoot\UnrealMCP.uplugin" "-Package=$packageDir" -TargetPlatforms=Win64
 if ($LASTEXITCODE -ne 0) {
     throw "BuildPlugin failed with exit code $LASTEXITCODE"
 }
@@ -231,7 +234,7 @@ $editorArgs = @(
     "-log"
 )
 
-$editorProcess = Start-Process -FilePath $Editor -ArgumentList $editorArgs -PassThru
+$editorProcess = Start-Process -FilePath $InteractiveEditor -ArgumentList $editorArgs -PassThru
 try {
     $bridgeSmokeScript = Join-Path $RepoRoot "Automation\mcp_bridge_smoke_test.py"
     $bridgeArgs = @(
@@ -267,8 +270,10 @@ if (Test-Path $snapshotDest) {
     Copy-Item $snapshotDest $previousSnapshot -Force
     $hasPrevious = $true
 } else {
+    $currentVersion = Get-VersionFromText $version
     $candidateSnapshots = @(
         Get-ChildItem $compatApiDir -Filter "ue-*.json" -File -ErrorAction SilentlyContinue |
+            Where-Object { (Get-SnapshotVersion $_) -lt $currentVersion } |
             Sort-Object { Get-SnapshotVersion $_ } -Descending
     )
     if ($candidateSnapshots.Count -gt 0) {
