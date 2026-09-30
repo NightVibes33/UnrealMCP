@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "initialized": false,
+  "latest_version": "5.8",
+  "sources": {
+    "whats_new": {
+      "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/whats-new",
+      "sha256": null
+    },
+    "release_notes": {
+      "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/unreal-engine-5-8-release-notes",
+      "sha256": null
+    },
+    "python_api": {
+      "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/python-api/",
+      "sha256": null
+    },
+    "python_scripting": {
+      "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/scripting-the-unreal-editor-using-python",
+      "sha256": null
+    },
+    "cpp_api": {
+      "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/API",
+      "sha256": null
+    }
+  }
+}

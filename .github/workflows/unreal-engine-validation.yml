@@ -1,0 +1,97 @@
+name: Real Unreal Engine compatibility validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_version:
+        description: "Expected Unreal major.minor version, for example 5.8 or 6.0"
+        required: false
+        type: string
+      commit_results:
+        description: "Commit generated API snapshots/reports back to this branch"
+        required: true
+        default: false
+        type: boolean
+      merge_if_safe:
+        description: "Merge the branch PR when build + live smoke test + API diff are safe"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: unreal-engine-validation-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: [self-hosted, Windows, X64, unreal]
+    timeout-minutes: 180
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Install external MCP dependencies
+        run: python -m pip install -r MCP/requirements.txt
+
+      - name: Build plugin and validate against real Unreal Editor
+        id: unreal
+        shell: pwsh
+        run: |
+          ./Automation/run_unreal_validation.ps1 -ExpectedVersion "${{ inputs.expected_version }}"
+
+      - name: Re-run hosted-side checks
+        shell: pwsh
+        run: |
+          python -m compileall -q MCP Automation
+          Push-Location MCP
+          python -m unittest tests.test_transport -v
+          Pop-Location
+          python -m unittest discover -s Automation/tests -v
+
+      - name: Commit compatibility evidence
+        if: inputs.commit_results
+        shell: pwsh
+        run: |
+          git config user.name "unrealmcp-validation-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add compat/api compat/reports
+          git diff --cached --quiet
+          if ($LASTEXITCODE -ne 0) {
+            git commit -m "chore: record Unreal ${{ steps.unreal.outputs.engine_version }} compatibility"
+            git push origin "HEAD:${{ github.ref_name }}"
+          }
+
+      - name: Merge compatible automated update
+        if: inputs.merge_if_safe && steps.unreal.outputs.diff_safe == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $branch = "${{ github.ref_name }}"
+          $pr = gh pr list --head $branch --base master --state open --json number --jq '.[0].number // empty'
+          if ($pr) {
+            gh pr comment $pr --body "Real Unreal validation passed on UE ${{ steps.unreal.outputs.engine_version }}: plugin compiled, live smoke test passed, and no breaking API change referenced by UnrealMCP was detected. Merging automatically."
+            gh pr merge $pr --squash --delete-branch
+          }
+
+      - name: Report incompatible API diff
+        if: inputs.merge_if_safe && steps.unreal.outputs.diff_safe != 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $branch = "${{ github.ref_name }}"
+          $pr = gh pr list --head $branch --base master --state open --json number --jq '.[0].number // empty'
+          if ($pr) {
+            gh pr comment $pr --body "Real Unreal validation compiled and ran, but the reflected API diff contains breaking changes referenced by UnrealMCP. Automatic merge is blocked; inspect compat/reports/."
+          }

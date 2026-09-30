@@ -5,6 +5,9 @@ on:
     branches: ["master"]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   python:
     strategy:
@@ -18,8 +21,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: "pip"
           cache-dependency-path: "MCP/requirements.txt"
+
       - run: python -m pip install -r MCP/requirements.txt
-      - run: python -m compileall -q MCP
+      - run: python -m compileall -q MCP Automation
+
       - name: Import and register complete tool surface
         run: |
           python - <<'PY'
@@ -27,13 +32,18 @@ jobs:
           sys.path.insert(0, "MCP")
           import unreal_mcp_bridge
           count = unreal_mcp_bridge.load_commands()
-          assert count >= 16, count
+          assert count >= 17, count
           print(f"registered {count} command modules")
           PY
-      - name: Transport tests
+
+      - name: MCP transport tests
         run: |
           cd MCP
           python -m unittest tests.test_transport -v
+
+      - name: Automation unit tests
+        run: python -m unittest discover -s Automation/tests -v
+
       - name: Modernization guards
         run: |
           ! grep -R 'EditorStyleSet.h' Source/UnrealMCP

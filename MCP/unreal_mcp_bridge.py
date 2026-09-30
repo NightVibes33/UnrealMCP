@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -16,10 +17,18 @@ try:
 except ImportError:
     from mcp.server.mcpserver import MCPServer
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+def _compat_state() -> dict:
+    path = ROOT.parent / "compat" / "epic-docs.json"
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {"latest_version": "unknown", "initialized": False, "sources": {}}
+
 
 mcp = MCPServer(
     "UnrealMCP",
@@ -77,22 +86,31 @@ def load_user_tools() -> int:
 def capabilities() -> str:
     """High-level capability map for agents."""
     return (
-        "UnrealMCP 1.1 provides project/system, live API discovery, actor/component, asset, "
+        "UnrealMCP 1.2 provides project/system, live API discovery and dynamic invocation, actor/component, asset, "
         "level/world-partition/data-layer, editor/PIE/viewport, static-mesh/Nanite/collision, "
         "material, Blueprint, Level Sequence, Niagara/PCG discovery, validation and Unreal "
         "Python escape-hatch tools. Use tools/list for exact schemas and get_unreal_capabilities "
-        "to detect the APIs/plugins exposed by the running Unreal build."
+        "to detect the APIs/plugins exposed by the running Unreal build. Newly exposed public Unreal APIs can be called through the dynamic invocation tools before a dedicated wrapper exists."
     )
 
 @mcp.resource("unrealmcp://engine-compatibility")
 def engine_compatibility() -> str:
-    """Explain the engine compatibility strategy."""
+    """Explain the engine compatibility strategy using the tracked Epic docs state."""
+    state = _compat_state()
+    version = state.get("latest_version") or "unknown"
     return (
-        "The public Epic documentation verified for this release is Unreal Engine 5.8. "
-        "There is no public Unreal Engine 6 Python/C++ API documentation to bind against. "
-        "Forward compatibility is handled through runtime unreal-module reflection, feature "
-        "guards and subsystem-based APIs instead of hard-coding undocumented UE6 symbols."
+        f"The latest Epic Unreal documentation version tracked by this checkout is {version}. "
+        "Forward compatibility is handled through runtime unreal-module reflection, dynamic "
+        "public API invocation, feature guards, and subsystem-based APIs. Newly detected engine "
+        "versions are not marked binary-compatible until the real-engine validation workflow "
+        "compiles the plugin and runs live smoke tests."
     )
+
+
+@mcp.resource("unrealmcp://update-status")
+def update_status() -> str:
+    """Return the machine-readable Epic documentation/update state."""
+    return json.dumps(_compat_state(), indent=2, sort_keys=True)
 
 @mcp.prompt()
 def inspect_then_edit(task: str) -> str:

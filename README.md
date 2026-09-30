@@ -11,7 +11,7 @@ and Python API**. As of September 30, 2026, Epic's public developer site does
 not expose Unreal Engine 6 Python/C++ API documentation, so the project does not
 invent undocumented UE6 symbols.
 
-Instead, UnrealMCP 1.1 is **UE6-forward-compatible by discovery**: agents can
+Instead, UnrealMCP 1.2 is **UE6-forward-compatible by discovery and live invocation**: agents can
 query the live reflected `unreal` module, detect subsystems/plugins at runtime,
 and adapt when newer engine builds expose changed APIs.
 
@@ -36,7 +36,7 @@ ChatGPT / Claude / Cursor / another MCP client
 The Python process is the MCP server. The C++ plugin is a localhost editor bridge
 and native command host.
 
-## 1.1 tool surface
+## 1.2 tool surface
 
 ### Runtime/API discovery
 
@@ -45,8 +45,11 @@ and native command host.
 - `describe_unreal_python_api`
 - `check_unreal_api_paths`
 - `get_enabled_plugins`
+- `invoke_unreal_api`
+- `invoke_editor_subsystem`
+- `invoke_engine_subsystem`
 
-These are the compatibility layer for plugin-specific APIs and future engine versions.
+These are the compatibility layer for plugin-specific APIs and future engine versions. The dynamic invocation tools can call newly reflected public Unreal APIs before a dedicated wrapper exists.
 
 ### Project/system
 
@@ -138,7 +141,7 @@ calling an old method.
 - Current documented target: UE 5.8
 - Python 3.11.8 is embedded by UE 5.8 for in-editor Python
 - Python 3.10+ recommended for the external MCP bridge environment
-- MCP Python SDK v2 (`mcp>=2.2,<3`)
+- MCP Python SDK v2 (`mcp==2.2.0` currently; Dependabot tests future minor/patch releases)
 
 Optional tool groups require their corresponding Unreal plugins, for example
 Niagara, PCG, Level Sequence Editor, or Data Validation.
@@ -205,6 +208,20 @@ Optional bridge overrides:
 - `UNREAL_MCP_HOST` (default `127.0.0.1`)
 - `UNREAL_MCP_PORT` (default `13377`)
 - `UNREAL_MCP_TIMEOUT` (default `30` seconds)
+
+## Self-updating compatibility
+
+UnrealMCP now includes an automated compatibility pipeline:
+
+- daily official Epic documentation monitoring;
+- generated documentation-state PRs;
+- automatic tracking of newly published Unreal release notes;
+- live Unreal Python API snapshots and version-to-version diffs;
+- a real Windows Unreal build/smoke-test workflow for a self-hosted runner;
+- automatic safe merging only when compatibility gates pass;
+- Dependabot updates for GitHub Actions and the pinned MCP SDK.
+
+For the full setup and safety model, see [Docs/SELF_UPDATING.md](Docs/SELF_UPDATING.md).
 
 ## Transport and safety
 

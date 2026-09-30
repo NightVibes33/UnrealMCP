@@ -1,9 +1,9 @@
 {
     "FileVersion": 3,
-    "Version": 11000,
-    "VersionName": "1.1.0",
+    "Version": 12000,
+    "VersionName": "1.2.0",
     "FriendlyName": "UnrealMCP",
-    "Description": "AI-facing Model Context Protocol integration for Unreal Editor, updated against the Unreal Engine 5.8 editor/Python API with runtime forward-compatibility discovery.",
+    "Description": "AI-facing Model Context Protocol integration for Unreal Editor with live API discovery, dynamic forward compatibility, and automated Epic docs/engine compatibility validation.",
     "Category": "Integration",
     "CreatedBy": "kvick / NightVibes33 fork",
     "CreatedByURL": "https://github.com/NightVibes33/UnrealMCP",

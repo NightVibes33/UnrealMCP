@@ -1,0 +1,33 @@
+name: Dependabot safe auto-merge
+
+on:
+  workflow_run:
+    workflows: ["UnrealMCP checks"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  merge:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge Dependabot PR after successful CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          PR_NUMBER="$(
+            gh api               -H "Accept: application/vnd.github+json"               "/repos/$REPOSITORY/commits/$HEAD_SHA/pulls"               --jq '.[] | select(.user.login == "dependabot[bot]") | .number' |
+              head -n 1
+          )"
+          if [ -z "$PR_NUMBER" ]; then
+            echo "Successful CI was not for a Dependabot PR."
+            exit 0
+          fi
+          gh pr comment "$PR_NUMBER" --repo "$REPOSITORY" --body "Hosted CI passed. This Dependabot minor/patch update is configured for automatic squash merge."
+          gh pr merge "$PR_NUMBER" --repo "$REPOSITORY" --squash --delete-branch

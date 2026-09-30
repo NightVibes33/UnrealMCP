@@ -1,0 +1,36 @@
+version: 2
+
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 5
+    groups:
+      actions-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
+
+  - package-ecosystem: "pip"
+    directory: "/MCP"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 5
+    allow:
+      - dependency-name: "mcp"
+    groups:
+      mcp-sdk-minor-patch:
+        patterns:
+          - "mcp"
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      - dependency-name: "mcp"
+        update-types:
+          - "version-update:semver-major"
