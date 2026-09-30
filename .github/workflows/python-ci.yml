@@ -44,6 +44,10 @@ jobs:
       - name: Automation unit tests
         run: python -m unittest discover -s Automation/tests -v
 
+      - name: Parse workflow YAML
+        run: |
+          ruby -e 'require "yaml"; Dir[".github/workflows/*.{yml,yaml}"].sort.each { |f| YAML.safe_load(File.read(f), aliases: true); puts "parsed #{f}" }'
+
       - name: Modernization guards
         run: |
           ! grep -R 'EditorStyleSet.h' Source/UnrealMCP

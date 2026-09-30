@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: "37 11 * * *"
   workflow_dispatch:
+  push:
+    branches: ["master"]
+    paths:
+      - "Automation/check_epic_docs.py"
+      - "compat/epic-docs.json"
+      - ".github/workflows/epic-docs-watch.yml"
 
 permissions:
   contents: write
