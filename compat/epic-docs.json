@@ -1,27 +1,56 @@
 {
-  "schema": 1,
-  "initialized": false,
+  "initialized": true,
+  "last_change_utc": "2026-09-30T14:36:59+00:00",
   "latest_version": "5.8",
+  "schema": 1,
   "sources": {
-    "whats_new": {
-      "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/whats-new",
-      "sha256": null
-    },
-    "release_notes": {
-      "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/unreal-engine-5-8-release-notes",
-      "sha256": null
+    "cpp_api": {
+      "etag": null,
+      "last_modified": null,
+      "normalized_bytes": 50166,
+      "sha256": "a32435fef175b151d9ec1e10d910652ab3574b21f794f298ec26e29599a7a19d",
+      "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/API",
+      "versions": [
+        "5.8"
+      ]
     },
     "python_api": {
+      "etag": null,
+      "last_modified": "Mon, 15 Jun 2026 19:21:20 GMT",
+      "normalized_bytes": 385416,
+      "sha256": "fd919eb80f8fa456b760938a7ef08eae892fc3073b6a2e14bff75448dc20a99a",
       "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/python-api/",
-      "sha256": null
+      "versions": []
     },
     "python_scripting": {
+      "etag": null,
+      "last_modified": null,
+      "normalized_bytes": 28816,
+      "sha256": "660c36dcacd20aae64f3d31ca33ed822fd43f1c91a8076b2e46c2543c1e4e618",
       "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/scripting-the-unreal-editor-using-python",
-      "sha256": null
+      "versions": [
+        "5.8"
+      ]
     },
-    "cpp_api": {
-      "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/API",
-      "sha256": null
+    "release_notes": {
+      "etag": null,
+      "last_modified": null,
+      "normalized_bytes": 720247,
+      "sha256": "4436c93af328e85121d63930655d0e459c616404fcd2aece74e5fbde635e269f",
+      "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/unreal-engine-5-8-release-notes",
+      "versions": [
+        "5.8"
+      ]
+    },
+    "whats_new": {
+      "etag": null,
+      "last_modified": null,
+      "normalized_bytes": 855,
+      "sha256": "d45d7c39ab0b51242e9a6ad7d87702fd99c112da5759670795b46fdd9fabf83f",
+      "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/whats-new",
+      "versions": [
+        "5.8"
+      ]
     }
   }
 }
