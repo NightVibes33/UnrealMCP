@@ -19,7 +19,7 @@ names.
 
 ## Forward compatibility strategy
 
-UnrealMCP 1.2.1 combines runtime discovery, dynamic invocation, and real-engine
+UnrealMCP 1.2.2 combines runtime discovery, dynamic invocation, and real-engine
 validation:
 
 - `get_unreal_capabilities`

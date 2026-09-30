@@ -11,7 +11,7 @@ and Python API**. As of September 30, 2026, Epic's public developer site does
 not expose Unreal Engine 6 Python/C++ API documentation, so the project does not
 invent undocumented UE6 symbols.
 
-Instead, UnrealMCP 1.2.1 is **UE6-forward-compatible by discovery, live invocation, and real-engine validation**: agents can
+Instead, UnrealMCP 1.2.2 is **UE6-forward-compatible by discovery, live invocation, and real-engine validation**: agents can
 query the live reflected `unreal` module, detect subsystems/plugins at runtime,
 and adapt when newer engine builds expose changed APIs.
 
@@ -36,7 +36,7 @@ ChatGPT / Claude / Cursor / another MCP client
 The Python process is the MCP server. The C++ plugin is a localhost editor bridge
 and native command host.
 
-## 1.2.1 tool surface
+## 1.2.2 tool surface
 
 ### Runtime/API discovery
 
@@ -220,7 +220,7 @@ UnrealMCP now includes an automated compatibility pipeline:
 - a real Windows Unreal build workflow for a self-hosted runner;
 - direct Unreal editor/subsystem smoke tests;
 - native UnrealMCP TCP bridge smoke tests using real MCP commands;
-- automatic safe merging only when compatibility gates pass;
+- automatic safe promotion only when compatibility gates pass, with a PR-preferred/direct-promotion fallback when repository settings block Actions-created PRs;
 - Dependabot updates for GitHub Actions and the pinned MCP SDK.
 
 The real-engine validator can auto-detect Epic Launcher installs, select the requested

@@ -1,6 +1,6 @@
 # Self-updating UnrealMCP
 
-UnrealMCP 1.2.1 has two update loops: a GitHub-hosted documentation/dependency loop and a real-engine validation loop.
+UnrealMCP 1.2.2 has two update loops: a GitHub-hosted documentation/dependency loop and a real-engine validation loop.
 
 ## 1. Epic documentation watcher
 
@@ -11,10 +11,11 @@ It monitors official Epic sources, normalizes their visible content, hashes it, 
 When documentation changes:
 
 1. The generated state/report is validated with the normal Python/MCP tests.
-2. An `automation/epic-docs-<version>` branch is created or refreshed.
-3. A pull request is opened.
-4. Same-version documentation-state changes are squash-merged after hosted validation.
-5. A newly observed Unreal major/minor stays open until a real Unreal installation proves compatibility.
+2. Same-version documentation changes (including first-run baseline initialization) are committed directly to `master` after hosted validation because they only update machine-readable docs state/evidence.
+3. A newly observed Unreal major/minor is placed on an `automation/epic-docs-<version>` validation branch.
+4. The workflow prefers to open/update a pull request when repository settings allow GitHub Actions to create PRs.
+5. If Actions-created PRs are disabled, the workflow does not fail: it preserves the validation branch, records the restriction in the job summary, and optionally creates a tracking issue.
+6. The new-version branch cannot be promoted until a real Unreal installation proves compatibility.
 
 The watcher automatically changes the tracked release-notes URL when a new Unreal major/minor version appears.
 
@@ -132,4 +133,6 @@ For unattended version validation:
 5. Optionally set machine environment variable `UNREAL_ENGINE_ROOT` for a nonstandard/source-build path.
 6. Set repository Actions variable `UNREAL_MCP_AUTOVALIDATE=true`.
 
-After that, new Epic documentation versions can flow from detection -> PR -> real engine build/smoke/API diff -> safe merge automatically.
+After that, new Epic documentation versions can flow from detection -> validation branch/PR when available -> real engine build/direct smoke/native MCP smoke/API diff -> safe promotion automatically.
+
+If repository settings block Actions-created pull requests, the real-engine workflow can still promote a fully validated branch directly to `master`. If branch protection also blocks that direct push, the validated branch and compatibility evidence remain preserved for the repository's normal protected-branch review path.

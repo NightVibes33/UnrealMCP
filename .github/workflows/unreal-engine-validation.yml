@@ -13,7 +13,7 @@ on:
         default: false
         type: boolean
       merge_if_safe:
-        description: "Merge the branch PR when build + direct Unreal smoke + native MCP smoke + API diff are safe"
+        description: "Promote the branch when build + direct Unreal smoke + native MCP smoke + API diff are safe"
         required: true
         default: false
         type: boolean
@@ -21,6 +21,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  issues: write
 
 concurrency:
   group: unreal-engine-validation-${{ github.ref }}
@@ -81,17 +82,35 @@ jobs:
             git push origin "HEAD:${{ github.ref_name }}"
           }
 
-      - name: Merge compatible automated update
+      - name: Promote compatible automated update
         if: inputs.merge_if_safe && steps.unreal.outputs.diff_safe == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          ENGINE_VERSION: ${{ steps.unreal.outputs.engine_version }}
+          ENGINE_MAJOR_MINOR: ${{ steps.unreal.outputs.major_minor }}
         run: |
           $branch = "${{ github.ref_name }}"
           $pr = gh pr list --head $branch --base master --state open --json number --jq '.[0].number // empty'
+
           if ($pr) {
-            gh pr comment $pr --body "Real Unreal validation passed on UE ${{ steps.unreal.outputs.engine_version }}: plugin compiled, direct Unreal API smoke passed, the native UnrealMCP TCP bridge passed real commands, and no breaking API change referenced by UnrealMCP was detected. Merging automatically."
+            gh pr comment $pr --body "Real Unreal validation passed on UE $env:ENGINE_VERSION: plugin compiled, direct Unreal API smoke passed, the native UnrealMCP TCP bridge passed real commands, and no breaking API change referenced by UnrealMCP was detected. Merging automatically."
             gh pr merge $pr --squash --delete-branch
+          } else {
+            Write-Host "No PR exists because this repository may block Actions-created PRs. Promoting the fully validated branch directly."
+            git fetch origin master
+            git rebase origin/master
+            git push origin HEAD:master
+            if ($branch -ne "master") {
+              git push origin --delete $branch
+            }
+          }
+
+          $issueTitle = "Automation: validate Unreal $env:ENGINE_MAJOR_MINOR compatibility"
+          $issue = gh issue list --state open --search "$issueTitle in:title" --json number,title --jq '.[] | select(.title == "'"$issueTitle"'") | .number' | Select-Object -First 1
+          if ($issue) {
+            gh issue comment $issue --body "Compatibility validation passed on UE $env:ENGINE_VERSION. Plugin compile, direct Unreal smoke, native MCP bridge smoke, and API-diff gates all passed."
+            gh issue close $issue
           }
 
       - name: Report incompatible API diff
@@ -99,9 +118,21 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          ENGINE_VERSION: ${{ steps.unreal.outputs.engine_version }}
+          ENGINE_MAJOR_MINOR: ${{ steps.unreal.outputs.major_minor }}
         run: |
           $branch = "${{ github.ref_name }}"
           $pr = gh pr list --head $branch --base master --state open --json number --jq '.[0].number // empty'
+
           if ($pr) {
-            gh pr comment $pr --body "The plugin compiled and both direct Unreal and native MCP smoke tests passed, but the reflected API diff contains breaking changes referenced by UnrealMCP. Automatic merge is blocked; inspect compat/reports/."
+            gh pr comment $pr --body "The plugin compiled and both direct Unreal and native MCP smoke tests passed, but the reflected API diff contains breaking changes referenced by UnrealMCP. Automatic promotion is blocked; inspect compat/reports/."
+          } else {
+            "### Automatic promotion blocked" | Out-File $env:GITHUB_STEP_SUMMARY -Append
+            "The plugin compiled and both smoke tests passed, but the reflected API diff references breaking changes. Branch $branch was preserved for review." | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          }
+
+          $issueTitle = "Automation: validate Unreal $env:ENGINE_MAJOR_MINOR compatibility"
+          $issue = gh issue list --state open --search "$issueTitle in:title" --json number,title --jq '.[] | select(.title == "'"$issueTitle"'") | .number' | Select-Object -First 1
+          if ($issue) {
+            gh issue comment $issue --body "UE $env:ENGINE_VERSION compiled and passed direct/native MCP smoke tests, but source-referenced breaking API changes were detected. Automatic promotion is blocked. Inspect compat/reports on branch $branch."
           }

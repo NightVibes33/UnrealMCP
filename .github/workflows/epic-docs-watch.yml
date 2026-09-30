@@ -14,6 +14,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  issues: write
   actions: write
 
 concurrency:
@@ -35,7 +36,9 @@ jobs:
       - name: Check official Epic documentation
         id: watch
         run: |
-          python Automation/check_epic_docs.py             --state compat/epic-docs.json             --report compat/reports/epic-docs-change.md
+          python Automation/check_epic_docs.py \
+            --state compat/epic-docs.json \
+            --report compat/reports/epic-docs-change.md
 
       - name: Validate generated update
         if: steps.watch.outputs.changed == 'true'
@@ -53,13 +56,31 @@ jobs:
           print(f"registered {count} command modules")
           PY
 
-      - name: Create or refresh documentation update PR
-        if: steps.watch.outputs.changed == 'true'
-        id: pr
+      - name: Persist hosted-safe documentation state
+        if: steps.watch.outputs.changed == 'true' && steps.watch.outputs.engine_version_changed != 'true'
+        env:
+          LATEST_VERSION: ${{ steps.watch.outputs.latest_version }}
+        run: |
+          set -euo pipefail
+          git config user.name "unrealmcp-update-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add compat/epic-docs.json compat/reports/epic-docs-change.md
+
+          if git diff --cached --quiet; then
+            echo "No documentation-state changes remain to persist."
+            exit 0
+          fi
+
+          git commit -m "chore: refresh Epic Unreal documentation state (${LATEST_VERSION:-unknown})"
+          git pull --rebase origin master
+          git push origin HEAD:master
+
+      - name: Create or refresh new-version validation branch
+        if: steps.watch.outputs.engine_version_changed == 'true'
+        id: version_branch
         env:
           GH_TOKEN: ${{ github.token }}
           LATEST_VERSION: ${{ steps.watch.outputs.latest_version }}
-          VERSION_CHANGED: ${{ steps.watch.outputs.engine_version_changed }}
         run: |
           set -euo pipefail
           SAFE_VERSION="$(printf '%s' "$LATEST_VERSION" | tr -cd '0-9A-Za-z._-')"
@@ -80,32 +101,93 @@ jobs:
           git config user.name "unrealmcp-update-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add compat/epic-docs.json compat/reports/epic-docs-change.md
-          git commit -m "chore: refresh Epic Unreal documentation state"
-          git push --force origin "HEAD:$BRANCH"
 
-          PR_NUMBER="$(gh pr list --head "$BRANCH" --base master --state open --json number --jq '.[0].number // empty')"
-          if [ -z "$PR_NUMBER" ]; then
-            PR_URL="$(gh pr create               --head "$BRANCH"               --base master               --title "chore: Epic Unreal docs update (${LATEST_VERSION:-unknown})"               --body-file compat/reports/epic-docs-change.md)"
-            PR_NUMBER="$(gh pr view "$PR_URL" --json number --jq '.number')"
+          if git diff --cached --quiet; then
+            echo "No version-state diff to push."
           else
-            gh pr edit "$PR_NUMBER"               --title "chore: Epic Unreal docs update (${LATEST_VERSION:-unknown})"               --body-file compat/reports/epic-docs-change.md
+            git commit -m "chore: detect Unreal ${LATEST_VERSION:-unknown} documentation"
           fi
 
+          git push --force origin "HEAD:$BRANCH"
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+          PR_NUMBER="$(gh pr list --head "$BRANCH" --base master --state open --json number --jq '.[0].number // empty')"
+
+          if [ -z "$PR_NUMBER" ]; then
+            set +e
+            PR_CREATE_OUTPUT="$(gh pr create \
+              --head "$BRANCH" \
+              --base master \
+              --title "chore: Epic Unreal docs update (${LATEST_VERSION:-unknown})" \
+              --body-file compat/reports/epic-docs-change.md 2>&1)"
+            PR_STATUS=$?
+            set -e
+
+            if [ "$PR_STATUS" -eq 0 ]; then
+              PR_NUMBER="$(gh pr view "$BRANCH" --json number --jq '.number')"
+            else
+              echo "::warning::GitHub Actions cannot create pull requests in this repository. The validation branch was still created successfully."
+              {
+                echo "### Unreal ${LATEST_VERSION:-unknown} update branch created"
+                echo ""
+                echo "GitHub Actions could not create a PR because the repository currently blocks Actions-created PRs."
+                echo "The branch $BRANCH is preserved and can still be validated and promoted automatically after all real-engine gates pass."
+                echo ""
+                echo "PR creation error: $PR_CREATE_OUTPUT"
+              } >> "$GITHUB_STEP_SUMMARY"
+
+              ISSUE_TITLE="Automation: validate Unreal ${LATEST_VERSION:-unknown} compatibility"
+              EXISTING_ISSUE="$(gh issue list --state open --search "$ISSUE_TITLE in:title" --json number,title --jq '.[] | select(.title == "'"$ISSUE_TITLE"'") | .number' | head -n 1)"
+              if [ -z "$EXISTING_ISSUE" ]; then
+                gh issue create \
+                  --title "$ISSUE_TITLE" \
+                  --body "Epic documentation now reports Unreal ${LATEST_VERSION:-unknown}. Automated update branch: $BRANCH. GitHub Actions is currently not permitted to create pull requests, so compatibility must be proven by the real-engine workflow before this branch can be promoted to master." \
+                  || echo "::warning::GitHub Actions could not create the tracking issue either; the validation branch and job summary were preserved."
+              fi
+            fi
+          else
+            gh pr edit "$PR_NUMBER" \
+              --title "chore: Epic Unreal docs update (${LATEST_VERSION:-unknown})" \
+              --body-file compat/reports/epic-docs-change.md
+          fi
+
           echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
 
-          if [ "$VERSION_CHANGED" != "true" ]; then
-            gh pr comment "$PR_NUMBER" --body "Hosted validation passed. This update only refreshes tracked documentation state, so it is safe to merge automatically."
-            gh pr merge "$PR_NUMBER" --squash --delete-branch
-          else
-            gh pr comment "$PR_NUMBER" --body "A new Unreal documentation version was detected. This PR will remain open until a real Unreal installation compiles the plugin and passes the live API smoke test."
+          if [ -n "$PR_NUMBER" ]; then
+            gh pr comment "$PR_NUMBER" --body "A new Unreal documentation version was detected. This update remains gated until a real Unreal installation compiles the plugin, passes the direct Unreal smoke test, passes the native UnrealMCP TCP smoke test, and passes the API-diff gate."
           fi
 
       - name: Dispatch real Unreal validation
         if: steps.watch.outputs.engine_version_changed == 'true' && vars.UNREAL_MCP_AUTOVALIDATE == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          BRANCH: ${{ steps.pr.outputs.branch }}
+          BRANCH: ${{ steps.version_branch.outputs.branch }}
           VERSION: ${{ steps.watch.outputs.latest_version }}
         run: |
-          gh workflow run unreal-engine-validation.yml             --ref "$BRANCH"             -f expected_version="$VERSION"             -f commit_results=true             -f merge_if_safe=true
+          set -euo pipefail
+          gh workflow run unreal-engine-validation.yml \
+            --ref "$BRANCH" \
+            -f expected_version="$VERSION" \
+            -f commit_results=true \
+            -f merge_if_safe=true
+
+      - name: Explain missing real-engine auto-validation
+        if: steps.watch.outputs.engine_version_changed == 'true' && vars.UNREAL_MCP_AUTOVALIDATE != 'true'
+        env:
+          VERSION: ${{ steps.watch.outputs.latest_version }}
+          BRANCH: ${{ steps.version_branch.outputs.branch }}
+        run: |
+          {
+            echo "### Real Unreal validation is waiting"
+            echo ""
+            echo "Detected Unreal version: $VERSION"
+            echo "Validation branch: $BRANCH"
+            echo ""
+            echo "Set repository Actions variable UNREAL_MCP_AUTOVALIDATE=true after a self-hosted Windows runner labelled unreal has the matching engine installed."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Summary
+        run: |
+          echo "Changed: ${{ steps.watch.outputs.changed }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Engine version changed: ${{ steps.watch.outputs.engine_version_changed }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Latest documented version: ${{ steps.watch.outputs.latest_version }}" >> "$GITHUB_STEP_SUMMARY"
