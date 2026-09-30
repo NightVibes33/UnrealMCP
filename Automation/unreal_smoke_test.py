@@ -1,10 +1,9 @@
-"""Live Unreal Editor smoke test for UnrealMCP compatibility validation."""
+"""Deterministic live Unreal Editor API smoke test for compatibility validation."""
 
 from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
 from pathlib import Path
 
 import unreal
@@ -13,7 +12,11 @@ import unreal
 def check(name, fn, results):
     try:
         value = fn()
-        results.append({"name": name, "ok": True, "value": str(value)})
+        results.append({
+            "name": name,
+            "ok": True,
+            "value_type": type(value).__name__ if value is not None else "NoneType",
+        })
         return value
     except Exception as exc:
         results.append({"name": name, "ok": False, "error": repr(exc)})
@@ -75,6 +78,7 @@ def main():
                     unreal.Rotator(pitch=0.0, yaw=15.0, roll=0.0),
                     True,
                 )
+
         spawned = check("actor:spawn_actor_from_class", spawn, results)
         if spawned:
             check("actor:get_location", lambda: spawned.get_actor_location(), results)
@@ -85,8 +89,7 @@ def main():
 
     failures = [item for item in results if not item["ok"]]
     payload = {
-        "schema": 1,
-        "generated_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        "schema": 2,
         "engine_version": unreal.SystemLibrary.get_engine_version(),
         "passed": not failures,
         "failure_count": len(failures),

@@ -26,6 +26,7 @@ public:
 	UNREALMCP_API FMCPTCPServer* GetServer() const { return Server.Get(); }
 
 private:
+	void HandlePostEngineInit();
 	void ExtendLevelEditorToolbar();
 	void AddToolbarButton(FToolBarBuilder& Builder);
 	void ToggleServer();

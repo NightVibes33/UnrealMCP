@@ -449,8 +449,26 @@ TSharedPtr<FJsonObject> FMCPExecutePythonHandler::Execute(const TSharedPtr<FJson
     }
 
     FPythonCommandEx Command;
-    Command.Command = bHasCode ? PythonCode : PythonFile;
-    Command.ExecutionMode = EPythonCommandExecutionMode::ExecuteFile;
+    if (bHasCode)
+    {
+        // ExecPythonCommandEx distinguishes literal statements from file execution.
+        // Wrap arbitrary multi-line code in one exec(...) statement so the full script
+        // is accepted while still using ExecuteStatement and captured LogOutput.
+        FString EscapedCode = PythonCode;
+        EscapedCode.ReplaceInline(TEXT("\\"), TEXT("\\\\"));
+        EscapedCode.ReplaceInline(TEXT("'"), TEXT("\\'"));
+        EscapedCode.ReplaceInline(TEXT("\r"), TEXT("\\r"));
+        EscapedCode.ReplaceInline(TEXT("\n"), TEXT("\\n"));
+        EscapedCode.ReplaceInline(TEXT("\t"), TEXT("\\t"));
+
+        Command.Command = FString::Printf(TEXT("exec('%s')"), *EscapedCode);
+        Command.ExecutionMode = EPythonCommandExecutionMode::ExecuteStatement;
+    }
+    else
+    {
+        Command.Command = PythonFile;
+        Command.ExecutionMode = EPythonCommandExecutionMode::ExecuteFile;
+    }
     Command.FileExecutionScope = EPythonFileExecutionScope::Private;
 
     MCP_LOG_INFO("Executing Python through IPythonScriptPlugin::ExecPythonCommandEx (%s)",

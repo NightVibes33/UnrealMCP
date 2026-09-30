@@ -13,7 +13,7 @@ on:
         default: false
         type: boolean
       merge_if_safe:
-        description: "Merge the branch PR when build + live smoke test + API diff are safe"
+        description: "Merge the branch PR when build + direct Unreal smoke + native MCP smoke + API diff are safe"
         required: true
         default: false
         type: boolean
@@ -58,6 +58,16 @@ jobs:
           Pop-Location
           python -m unittest discover -s Automation/tests -v
 
+      - name: Validation summary
+        shell: pwsh
+        run: |
+          "### UnrealMCP real-engine validation" | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          "- Engine: ${{ steps.unreal.outputs.engine_version }}" | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          "- Plugin compile: PASS" | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          "- Direct Unreal API smoke: PASS" | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          "- Native MCP TCP bridge smoke: PASS" | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          "- API diff safe: ${{ steps.unreal.outputs.diff_safe }}" | Out-File $env:GITHUB_STEP_SUMMARY -Append
+
       - name: Commit compatibility evidence
         if: inputs.commit_results
         shell: pwsh
@@ -80,7 +90,7 @@ jobs:
           $branch = "${{ github.ref_name }}"
           $pr = gh pr list --head $branch --base master --state open --json number --jq '.[0].number // empty'
           if ($pr) {
-            gh pr comment $pr --body "Real Unreal validation passed on UE ${{ steps.unreal.outputs.engine_version }}: plugin compiled, live smoke test passed, and no breaking API change referenced by UnrealMCP was detected. Merging automatically."
+            gh pr comment $pr --body "Real Unreal validation passed on UE ${{ steps.unreal.outputs.engine_version }}: plugin compiled, direct Unreal API smoke passed, the native UnrealMCP TCP bridge passed real commands, and no breaking API change referenced by UnrealMCP was detected. Merging automatically."
             gh pr merge $pr --squash --delete-branch
           }
 
@@ -93,5 +103,5 @@ jobs:
           $branch = "${{ github.ref_name }}"
           $pr = gh pr list --head $branch --base master --state open --json number --jq '.[0].number // empty'
           if ($pr) {
-            gh pr comment $pr --body "Real Unreal validation compiled and ran, but the reflected API diff contains breaking changes referenced by UnrealMCP. Automatic merge is blocked; inspect compat/reports/."
+            gh pr comment $pr --body "The plugin compiled and both direct Unreal and native MCP smoke tests passed, but the reflected API diff contains breaking changes referenced by UnrealMCP. Automatic merge is blocked; inspect compat/reports/."
           }

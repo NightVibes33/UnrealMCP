@@ -1,6 +1,8 @@
-"""Generate a machine-readable snapshot of the live reflected Unreal Python API.
+"""Generate a deterministic machine-readable snapshot of the live reflected Unreal Python API.
 
 Run inside Unreal Editor. The output path comes from UNREAL_MCP_API_SNAPSHOT.
+Volatile machine/time/project-path fields are intentionally excluded so source-control
+changes represent real engine/API changes rather than runner noise.
 """
 
 from __future__ import annotations
@@ -8,9 +10,7 @@ from __future__ import annotations
 import inspect
 import json
 import os
-import platform
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 import unreal
@@ -101,13 +101,12 @@ def main():
             continue
         symbols[name] = describe_symbol(name)
 
+    engine_version = unreal.SystemLibrary.get_engine_version()
     payload = {
-        "schema": 1,
-        "generated_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
-        "engine_version": unreal.SystemLibrary.get_engine_version(),
-        "python_version": sys.version,
-        "platform": platform.platform(),
-        "project_file": unreal.Paths.get_project_file_path(),
+        "schema": 2,
+        "engine_version": engine_version,
+        "engine_major_minor": ".".join(engine_version.split(".")[:2]),
+        "python_version": ".".join(str(x) for x in sys.version_info[:3]),
         "enabled_plugins": enabled_plugins(),
         "symbols": symbols,
     }

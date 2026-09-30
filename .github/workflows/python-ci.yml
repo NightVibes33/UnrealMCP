@@ -4,6 +4,7 @@ on:
   push:
     branches: ["master"]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -48,9 +49,12 @@ jobs:
         run: |
           ruby -e 'require "yaml"; Dir[".github/workflows/*.{yml,yaml}"].sort.each { |f| YAML.safe_load(File.read(f), aliases: true); puts "parsed #{f}" }'
 
-      - name: Modernization guards
+      - name: Modernization and self-update guards
         run: |
           ! grep -R 'EditorStyleSet.h' Source/UnrealMCP
           ! grep -R 'EditorStaticMeshLibrary' MCP/Commands Source/UnrealMCP
           ! grep -R 'DataLayerSubsystem' MCP/Commands Source/UnrealMCP
           ! grep -R 'GEngine->Exec.*py' Source/UnrealMCP
+          ! grep -R 'Command.Command = bHasCode ? PythonCode : PythonFile' Source/UnrealMCP
+          grep -R 'UnrealMCPServer' Source/UnrealMCP/Private/UnrealMCP.cpp
+          test -f Automation/mcp_bridge_smoke_test.py

@@ -24,6 +24,9 @@
 #include "Widgets/Layout/SUniformGridPanel.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Styling/AppStyle.h"
+#include "Misc/App.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 
 // Define the log category
 DEFINE_LOG_CATEGORY(LogMCP);
@@ -114,12 +117,13 @@ void FUnrealMCPModule::StartupModule()
 	FString LogFilePath = FPaths::Combine(MCPConstants::PluginLogsPath, TEXT("MCPServer.log"));
 	FMCPFileLogger::Get().Initialize(LogFilePath);
 	
-	// Register style set
-	FMCPPluginStyle::Initialize();
-	FSlateStyleRegistry::RegisterSlateStyle(*FMCPPluginStyle::Get());
-	
-	// More debug logging
-	MCP_LOG_INFO("UnrealMCP Style registered");
+	// Skip Slate-specific setup on unattended/headless validation runs.
+	if (!FApp::IsUnattended())
+	{
+		FMCPPluginStyle::Initialize();
+		FSlateStyleRegistry::RegisterSlateStyle(*FMCPPluginStyle::Get());
+		MCP_LOG_INFO("UnrealMCP Style registered");
+	}
 
 	// Register settings
 	if (ISettingsModule* SettingsModule = FModuleManager::GetModulePtr<ISettingsModule>("Settings"))
@@ -136,7 +140,21 @@ void FUnrealMCPModule::StartupModule()
 	FCoreDelegates::OnPostEngineInit.RemoveAll(this);
 	
 	MCP_LOG_INFO("Registering OnPostEngineInit delegate");
-	FCoreDelegates::OnPostEngineInit.AddRaw(this, &FUnrealMCPModule::ExtendLevelEditorToolbar);
+	FCoreDelegates::OnPostEngineInit.AddRaw(this, &FUnrealMCPModule::HandlePostEngineInit);
+}
+
+void FUnrealMCPModule::HandlePostEngineInit()
+{
+	if (!FApp::IsUnattended() && FSlateApplication::IsInitialized())
+	{
+		ExtendLevelEditorToolbar();
+	}
+
+	if (FParse::Param(FCommandLine::Get(), TEXT("UnrealMCPServer")))
+	{
+		MCP_LOG_INFO("Auto-starting MCP server from -UnrealMCPServer");
+		StartServer();
+	}
 }
 
 void FUnrealMCPModule::ShutdownModule()
@@ -484,16 +502,25 @@ void FUnrealMCPModule::StartServer()
 	// Create a config object and set the port from settings
 	FMCPTCPServerConfig Config;
 	Config.Port = Settings->Port;
+
+	int32 CommandLinePort = Config.Port;
+	if (FParse::Value(FCommandLine::Get(), TEXT("UnrealMCPPort="), CommandLinePort))
+	{
+		Config.Port = FMath::Clamp(CommandLinePort, 1024, 65535);
+		MCP_LOG_INFO("Using command-line MCP port override: %d", Config.Port);
+	}
 	
 	// Create the server with the config
 	Server = MakeUnique<FMCPTCPServer>(Config);
 	
 	if (Server->Start())
 	{
-		// Refresh the toolbar to update the status indicator
-		if (UToolMenus* ToolMenus = UToolMenus::Get())
+		if (!FApp::IsUnattended())
 		{
-			ToolMenus->RefreshAllWidgets();
+			if (UToolMenus* ToolMenus = UToolMenus::Get())
+			{
+				ToolMenus->RefreshAllWidgets();
+			}
 		}
 	}
 	else
@@ -510,10 +537,12 @@ void FUnrealMCPModule::StopServer()
 		Server.Reset();
 		MCP_LOG_INFO("MCP Server stopped");
 		
-		// Refresh the toolbar to update the status indicator
-		if (UToolMenus* ToolMenus = UToolMenus::Get())
+		if (!FApp::IsUnattended())
 		{
-			ToolMenus->RefreshAllWidgets();
+			if (UToolMenus* ToolMenus = UToolMenus::Get())
+			{
+				ToolMenus->RefreshAllWidgets();
+			}
 		}
 	}
 }

@@ -14,20 +14,49 @@ jobs:
     if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
-      - name: Merge Dependabot PR after successful CI
+      - name: Merge only same-major Dependabot updates after successful CI
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
+
           PR_NUMBER="$(
             gh api               -H "Accept: application/vnd.github+json"               "/repos/$REPOSITORY/commits/$HEAD_SHA/pulls"               --jq '.[] | select(.user.login == "dependabot[bot]") | .number' |
               head -n 1
           )"
+
           if [ -z "$PR_NUMBER" ]; then
             echo "Successful CI was not for a Dependabot PR."
             exit 0
           fi
-          gh pr comment "$PR_NUMBER" --repo "$REPOSITORY" --body "Hosted CI passed. This Dependabot minor/patch update is configured for automatic squash merge."
+
+          TITLE="$(gh pr view "$PR_NUMBER" --repo "$REPOSITORY" --json title --jq '.title')"
+          echo "Dependabot PR title: $TITLE"
+
+          python - "$TITLE" <<'PY'
+          import re
+          import sys
+
+          title = sys.argv[1]
+          match = re.search(
+              r"\bfrom\s+v?(\d+)(?:\.\d+){0,3}\s+to\s+v?(\d+)(?:\.\d+){0,3}\b",
+              title,
+              flags=re.IGNORECASE,
+          )
+          if not match:
+              print("Could not prove this is a same-major version update; refusing auto-merge.", file=sys.stderr)
+              raise SystemExit(2)
+
+          before_major = int(match.group(1))
+          after_major = int(match.group(2))
+          if before_major != after_major:
+              print(f"Major update {before_major} -> {after_major}; refusing auto-merge.", file=sys.stderr)
+              raise SystemExit(3)
+
+          print(f"Same-major update {before_major} -> {after_major}; eligible after successful CI.")
+          PY
+
+          gh pr comment "$PR_NUMBER" --repo "$REPOSITORY"             --body "Hosted CI passed and this is a same-major Dependabot update. Squash-merging automatically."
           gh pr merge "$PR_NUMBER" --repo "$REPOSITORY" --squash --delete-branch
