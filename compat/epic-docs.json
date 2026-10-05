@@ -1,6 +1,6 @@
 {
   "initialized": true,
-  "last_change_utc": "2026-09-30T15:00:51+00:00",
+  "last_change_utc": "2026-10-05T19:53:46+00:00",
   "latest_version": "5.8",
   "schema": 1,
   "sources": {
@@ -35,8 +35,8 @@
     "release_notes": {
       "etag": null,
       "last_modified": null,
-      "normalized_bytes": 720247,
-      "sha256": "4436c93af328e85121d63930655d0e459c616404fcd2aece74e5fbde635e269f",
+      "normalized_bytes": 719925,
+      "sha256": "01804c7727555f88d2d8ce1ac6fdda004cc0fe6c872d9dfe8d73fe29771b4292",
       "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/unreal-engine-5-8-release-notes",
       "versions": [
         "5.8"
