@@ -1,1 +1,0 @@
-"""UnrealMCP Python-side tests."""

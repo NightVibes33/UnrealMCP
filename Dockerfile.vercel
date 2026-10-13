@@ -1,0 +1,18 @@
+FROM debian:bookworm-slim AS builder
+RUN apt-get update && apt-get install --no-install-recommends -y ca-certificates ldc git clang dub libz-dev libssl-dev libplist-dev python3 && rm -rf /var/lib/apt/lists/*
+WORKDIR /opt/source
+RUN git init . && git remote add origin https://github.com/Dadoum/anisette-v3-server.git && git fetch --depth 1 origin 684895737aaf1a1c4586fcd5b67509ffd500a36c && git checkout --detach FETCH_HEAD
+COPY customize.py /opt/source/customize.py
+RUN python3 customize.py
+RUN DC=ldc2 dub build -c "static" --build-mode allAtOnce -b release --compiler=ldc2
+COPY download-libraries.py /opt/source/download-libraries.py
+RUN python3 download-libraries.py
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install --no-install-recommends -y ca-certificates curl libplist-2.0-3 && rm -rf /var/lib/apt/lists/*
+WORKDIR /tmp
+COPY --from=builder /opt/source/anisette-v3-server /opt/anisette-v3-server
+COPY --from=builder /opt/libraries/ /opt/anisette/lib/
+ENV RUNTIME_DIRECTORY=/tmp
+EXPOSE 80
+ENTRYPOINT ["/opt/anisette-v3-server", "--host", "0.0.0.0", "--port", "80", "--adi-path", "/opt/anisette", "--timeout", "30000"]
